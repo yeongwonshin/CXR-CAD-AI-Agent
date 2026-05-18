@@ -2,7 +2,7 @@
 CXR-CAD 학습 루프 뼈대.
 
 실제 학습은 Google Colab 노트북 (notebooks/04_Training.ipynb)에서 수행합니다.
-학습 완료 후 생성된 .pth 파일을 checkpoints/ 디렉토리에 배치하면
+학습 완료 후 생성된 .pth 파일을 checkpoints/<model_key>/ 디렉토리에 배치하면
 API 서버(api/main.py)가 자동으로 로드합니다.
 
 구현 예정 기능:
@@ -77,12 +77,12 @@ class Trainer:
             "optimizer_state_dict": optimizer.state_dict(),
             "val_auroc"        : best_auroc,
             "val_auprc"        : best_auprc,
-        }, "checkpoints/<model_key>_best.pth")
+        }, "checkpoints/<model_key>/<model_key>_best.pth")
     """
 
     def __init__(self, model, optimizer, criterion, device, early_stopping=None,
                  scheduler=None, use_amp=True, grad_clip=1.0, 
-                 checkpoint_path="checkpoints/best.pth"):
+                 checkpoint_path="checkpoints/densenet/densenet_best.pth"):
         self.model = model
         self.optimizer = optimizer
         self.criterion = criterion

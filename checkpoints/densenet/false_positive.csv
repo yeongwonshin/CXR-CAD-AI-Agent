@@ -1,0 +1,3 @@
+Case,예측,GT,확률,Grad-CAM,원인
+FP-1,Cardiomegaly,Normal,0.88,심장 전체 오인,AP 뷰 구조적 착시
+FP-2,Effusion,Normal,0.72,유방 그림자 오인,지방 조직 음영

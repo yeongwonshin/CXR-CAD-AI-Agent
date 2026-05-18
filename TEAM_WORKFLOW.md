@@ -60,8 +60,8 @@ print(f"Dataset Path: {NIH_DIR}, Batch Size: {BATCH_SIZE}, Gamma: {FOCAL_GAMMA}"
   - Vast.ai의 고성능 GPU(RTX 3090/4090) 인스턴스에서 `tmux`를 활용, `scripts/run_optuna.py`를 실행하여 며칠간 최적의 파라미터를 도출.
   - 탐색된 최적 파라미터로 `scripts/train.py`를 수행하여 5-Fold를 완주하고 최고 성능 모델 가중치를 획득.
 - [ ] **⚠️ 학습 모델 및 분석 결과 저장 규칙! (핵심)**
-  - 학습 완료 후 최종 가중치 파일(`.pth`), 평가 결괏값(`.csv`) 등 산출물은 반드시 리포지토리의 **`checkpoints/` 폴더 내부에 저장**해야 Backend에서 즉시 로드할 수 있습니다.
-  - 예시 파일: `checkpoints/densenet121_fold1.pth`, `checkpoints/densenet_test_results.csv`, `checkpoints/class_distribution.png`
+  - 학습 완료 후 최종 가중치 파일(`.pth`), 평가 결괏값(`.csv`) 등 산출물은 반드시 리포지토리의 **`checkpoints/<model>/` 폴더 내부에 저장**해야 Backend에서 즉시 로드할 수 있습니다.
+  - 예시 파일: `checkpoints/densenet/densenet_best.pth`, `checkpoints/densenet/test_predictions.csv`
 - [ ] **하이브리드 분석 워크플로우 (Kaggle)**
   - Vast.ai에서 생성 및 다운로드된 `.pth` 최적 가중치 파일들을 캐글에 Private Dataset으로 업로드합니다.
   - 비용 절감을 위해 추론/분석 작업은 캐글의 무료 T4 환경에서 진행하는 것을 권장합니다.
@@ -80,7 +80,7 @@ print(f"Dataset Path: {NIH_DIR}, Batch Size: {BATCH_SIZE}, Gamma: {FOCAL_GAMMA}"
 **목표:** AI 모델 가중치를 안정적으로 서빙하고, UI(Frontend)에 빠르고 정확한 API 리스폰스 제공.
 
 - [ ] **`api/main.py` 구조 및 로직 점검**
-  - AI팀이 생산해 `checkpoints/`에 배치할 `.pth` 파일을 자동으로 스캔하여 메모리에 적재하는 로직 점검 (Placeholder 모드 핸들링 포함).
+  - AI팀이 생산해 `checkpoints/<model>/`에 배치할 `.pth` 파일을 자동으로 스캔하여 메모리에 적재하는 로직 점검 (Placeholder 모드 핸들링 포함).
   - API 추론 시, AI 모델이 출력한 `logits` 값을 `torch.sigmoid()`로 역산하여 확률화하는 로직 검증.
 - [ ] **성능 모니터링 기능 추가 (Optional)**
   - 단일 이미지 당 API Response Time(Inference Time) 점검 및 속도 개선(Batching, TorchScript 등).
@@ -96,7 +96,7 @@ print(f"Dataset Path: {NIH_DIR}, Batch Size: {BATCH_SIZE}, Gamma: {FOCAL_GAMMA}"
   - `page_link` 버튼이나 사이드바에서 다른 페이지로 이동하는 UI 디자인(UX/UI 렌더링) 무너짐 없는지 테스트.
   - API 서버(BE)와 연동하여 임계값(Threshold)에 따른 동적 차트 업데이트 및 상태 알림 표시.
 - [ ] **분석 결과 시각화 모듈 (`dashboard/pages/analysis_results.py`)** 
-  - 최근 신규 생성된 멀티페이지 파일로, AI 팀이 `checkpoints/`에 저장할 `.csv` 파일들이 UI 차트로 정상 변환되는지 테스트.
+  - 최근 신규 생성된 멀티페이지 파일로, AI 팀이 `checkpoints/<model>/`에 저장할 `.csv` 파일들이 UI 차트로 정상 변환되는지 테스트.
   - 임시 예시 데이터(Example Data) 표시 안내 문구와, 실제 `.csv` 발견 시 자동 렌더링으로 넘어가는 전환 기능 확인.
 
 ---
@@ -104,6 +104,6 @@ print(f"Dataset Path: {NIH_DIR}, Batch Size: {BATCH_SIZE}, Gamma: {FOCAL_GAMMA}"
 ## 📅 전체 실행 로드맵 (순서 권장)
 
 1. **Phase 1 (Data & AI):** Data팀의 로더 검증 이후 ➡️ AI팀과 함께 `KAGGLE_SETUP.md` 구축 환경에 탑승.
-2. **Phase 2 (AI 학습):** 5-Fold 학습 루프로 밤샘 GPU 학습 후 최고 모델을 `checkpoints/` 에 추출.
+2. **Phase 2 (AI 학습):** 5-Fold 학습 루프로 밤샘 GPU 학습 후 최고 모델을 `checkpoints/<model>/` 에 추출.
 3. **Phase 3 (BE 서빙):** 가중치 파일 확보 후 BE팀은 로컬 API 환경에서 로드 테스트 진행.
 4. **Phase 4 (FE 연동):** BE 서버(8000 포트) 실행 상태에서 Streamlit(8501 포트) FE팀 테스트, End-to-End 데모 완성.

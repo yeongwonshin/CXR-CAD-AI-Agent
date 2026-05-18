@@ -113,13 +113,19 @@ st.markdown(
 
 
 # ── 상수 ──────────────────────────────────────────────────────────────────────
-CHECKPOINT_DIR = Path(os.environ.get("CHECKPOINT_DIR", "checkpoints"))
-DEFAULT_LLM_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+BASE_CHECKPOINT_DIR = Path(os.environ.get("CHECKPOINT_DIR", "checkpoints"))
+DEFAULT_LLM_MODEL  = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+
+SUPPORTED_MODELS = {
+    "densenet":    "🔗 DenseNet-121",
+    "efficientnet": "⚡ EfficientNet-B4",
+    "vit":         "🧠 ViT-B/16",
+}
 
 
 # ── 데이터 로드 함수 ────────────────────────────────────────────────────────
-def load_csv_data(filename: str, fallback_cols: list) -> pd.DataFrame:
-    path = CHECKPOINT_DIR / filename
+def load_csv_data(checkpoint_dir: Path, filename: str, fallback_cols: list) -> pd.DataFrame:
+    path = checkpoint_dir / filename
     if path.exists():
         try:
             return pd.read_csv(path)
@@ -127,49 +133,43 @@ def load_csv_data(filename: str, fallback_cols: list) -> pd.DataFrame:
             st.error(f"Failed to read {filename}: {e}")
     return pd.DataFrame(columns=fallback_cols)
 
-# 체크포인트 디렉토리에서 실제 평가 결과물들을 스캔하여 로드
-EXAMPLE_OP = load_csv_data(
-    "op_analysis.csv", 
-    ["기준", "Threshold", "Sensitivity", "Specificity", "PPV", "NPV"]
-)
 
-EXAMPLE_GENDER = load_csv_data(
-    "gender_subgroup.csv", 
-    ["Disease", "Male AUROC", "Female AUROC", "Gap"]
-)
+def load_model_data(checkpoint_dir: Path) -> dict:
+    """선택된 모델의 서브디렉토리에서 결과 CSV를 모두 로드."""
+    return {
+        "op":     load_csv_data(checkpoint_dir, "op_analysis.csv",
+                                ["기준", "Threshold", "Sensitivity", "Specificity", "PPV", "NPV"]),
+        "gender": load_csv_data(checkpoint_dir, "gender_subgroup.csv",
+                                ["Disease", "Male AUROC", "Female AUROC", "Gap"]),
+        "age":    load_csv_data(checkpoint_dir, "age_subgroup.csv",
+                                ["Age Group", "N", "Mean AUROC"]),
+        "view":   load_csv_data(checkpoint_dir, "view_subgroup.csv",
+                                ["View", "N", "Mean AUROC", "Gap vs PA"]),
+        "ext":    load_csv_data(checkpoint_dir, "domain_shift.csv",
+                                ["Disease", "NIH AUROC", "CheXpert AUROC", "Gap"]),
+        "fp":     load_csv_data(checkpoint_dir, "false_positive.csv",
+                                ["Case", "예측", "GT", "확률", "Grad-CAM", "원인"]),
+        "fn":     load_csv_data(checkpoint_dir, "false_negative.csv",
+                                ["Case", "예측", "GT", "확률", "Grad-CAM", "원인"]),
+        "region": load_csv_data(checkpoint_dir, "shortcut_regions.csv",
+                                ["영역", "Count"]),
+    }
 
-# 아직 노트북 구현이 없는 부분이나 나이에 대한 처리는 빈 DF가 리턴됩니다.
-EXAMPLE_AGE = load_csv_data(
-    "age_subgroup.csv", 
-    ["Age Group", "N", "Mean AUROC"]
-)
 
-EXAMPLE_VIEW = load_csv_data(
-    "view_subgroup.csv", 
-    ["View", "N", "Mean AUROC", "Gap vs PA"]
-)
+# ── 모델 선택 (session_state 기반, 사이드바보다 먼저 실행) ────────────────────
+_selected_model = st.session_state.get("analysis_selected_model", "densenet")
+CHECKPOINT_DIR = BASE_CHECKPOINT_DIR / _selected_model
+_data = load_model_data(CHECKPOINT_DIR)
 
-# 08 노트북의 결과
-EXAMPLE_EXT = load_csv_data(
-    "densenet_domain_shift.csv", # 기본 덴스넷 기준
-    ["Disease", "NIH AUROC", "CheXpert AUROC", "Gap"]
-)
-
-FALSE_POSITIVE_DF = load_csv_data(
-    "false_positive.csv", 
-    ["Case", "예측", "GT", "확률", "Grad-CAM", "원인"]
-)
-
-FALSE_NEGATIVE_DF = load_csv_data(
-    "false_negative.csv", 
-    ["Case", "예측", "GT", "확률", "Grad-CAM", "원인"]
-)
-
-# 아직 에러 분석에서 추출하지 않는 영역
-REGION_DF = load_csv_data(
-    "shortcut_regions.csv", 
-    ["영역", "Count"]
-)
+# 렌더 함수들이 참조하는 전역 변수 (모델 전환 시 자동 갱신)
+EXAMPLE_OP        = _data["op"]
+EXAMPLE_GENDER    = _data["gender"]
+EXAMPLE_AGE       = _data["age"]
+EXAMPLE_VIEW      = _data["view"]
+EXAMPLE_EXT       = _data["ext"]
+FALSE_POSITIVE_DF = _data["fp"]
+FALSE_NEGATIVE_DF = _data["fn"]
+REGION_DF         = _data["region"]
 
 
 # ── 차트 헬퍼 ─────────────────────────────────────────────────────────────────
@@ -719,12 +719,24 @@ with st.sidebar:
     st.markdown("*지표별 분석 화면*")
     st.divider()
 
-    # 실제 결과 데이터 인지 조건 수정 (test_predictions.csv 혹은 op_analysis.csv가 있으면 실제 데이터로 간주)
-    has_real = any((CHECKPOINT_DIR / f).exists() for f in ["test_predictions.csv", "op_analysis.csv"])
+    # ── 모델 선택기 ──────────────────────────────────────────────────────────
+    st.markdown("### 🤖 분석 모델")
+    st.selectbox(
+        "결과를 볼 모델 선택",
+        options=list(SUPPORTED_MODELS.keys()),
+        format_func=lambda k: SUPPORTED_MODELS[k],
+        key="analysis_selected_model",
+    )
+    st.caption(f"📂 `checkpoints/{st.session_state['analysis_selected_model']}/`")
+
+    has_real = any(
+        (CHECKPOINT_DIR / f).exists()
+        for f in ["test_predictions.csv", "op_analysis.csv"]
+    )
     if has_real:
         st.success("✅ 실제 결과 데이터 감지됨")
     else:
-        st.info("ℹ️ 예시 데이터를 표시합니다. 학습 결과가 생성되면 실제 값으로 교체하세요.")
+        st.info("ℹ️ 결과 없음 — 학습 후 체크포인트를 배치하세요.")
 
     st.divider()
     selected_metric = st.radio(
@@ -762,6 +774,7 @@ with st.sidebar:
         "</div>",
         unsafe_allow_html=True,
     )
+
 
 
 # ── 본문 렌더 ─────────────────────────────────────────────────────────────────

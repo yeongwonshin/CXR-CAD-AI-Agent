@@ -72,7 +72,7 @@ def objective(trial, args, CFG, train_df, IMG_DIR, device):
     # 조기 종료 조건 완화 (Optuna Pruner가 주로 관리)
     early_stopping = EarlyStopping(patience=5, mode='max')
     
-    ckpt_path = Path("checkpoints") / f"optuna_trial_{trial.number}.pth"
+    ckpt_path = Path("checkpoints") / MODEL_KEY / f"optuna_trial_{trial.number}.pth"
 
     trainer = Trainer(
         model=model,

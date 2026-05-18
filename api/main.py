@@ -7,7 +7,7 @@ FastAPI 엔드포인트:
   POST /predict  → 흉부 X-ray 분석 (PNG/JPEG/DICOM)
 
 가중치 로드 규칙:
-  - 서버 시작 시 checkpoints/<model_key>_best.pth 자동 탐색
+  - 서버 시작 시 checkpoints/<model_key>/<model_key>_best.pth 자동 탐색
   - 파일이 존재하면 실제 모델 추론, 없으면 Placeholder 모드
   - .pth 파일은 절대 Git 저장소에 포함하지 않습니다 (.gitignore 참조)
 
@@ -17,7 +17,7 @@ FastAPI 엔드포인트:
         "model_state_dict"   : model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "val_auroc"          : best_auroc,
-    }, "checkpoints/<model_key>_best.pth")
+    }, "checkpoints/<model_key>/<model_key>_best.pth")
 """
 
 from __future__ import annotations
@@ -67,14 +67,25 @@ _model_registry: Dict[str, Optional[object]] = {k: None for k in SUPPORTED_MODEL
 
 def _find_checkpoint(model_key: str) -> Optional[Path]:
     """
-    checkpoints/ 디렉토리에서 <model_key>_best.pth 탐색.
+    checkpoints/<model_key>/ 서브디렉토리에서 <model_key>_best.pth 탐색.
 
-    파일명 패턴: <model_key>_best.pth
-    ex) densenet_best.pth, efficientnet_best.pth, vit_best.pth
+    탐색 우선순위:
+      1. checkpoints/<model_key>/<model_key>_best.pth  ← 신규 구조
+      2. checkpoints/<model_key>/*.pth (glob)           ← 신규 구조 변형
+      3. checkpoints/<model_key>_best.pth              ← 구버전 flat 구조 (하위 호환)
+    ex) checkpoints/densenet/densenet_best.pth
     """
     if not CHECKPOINT_DIR.exists():
         return None
-    # 직접 이름 매칭 우선, 없으면 glob으로 최신 파일
+    # 1) 신규: 서브디렉토리 내 직접 매칭
+    sub_direct = CHECKPOINT_DIR / model_key / f"{model_key}_best.pth"
+    if sub_direct.exists():
+        return sub_direct
+    # 2) 신규: 서브디렉토리 내 glob
+    sub_candidates = sorted((CHECKPOINT_DIR / model_key).glob(f"{model_key}*.pth"), reverse=True)
+    if sub_candidates:
+        return sub_candidates[0]
+    # 3) 구버전 flat 구조 fallback
     direct = CHECKPOINT_DIR / f"{model_key}_best.pth"
     if direct.exists():
         return direct
@@ -127,7 +138,7 @@ def _load_checkpoint_weights(model_key: str, ckpt_path: Path) -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    서버 시작 시 checkpoints/ 폴더의 .pth 파일을 자동으로 탐색·로드합니다.
+    서버 시작 시 checkpoints/<model>/ 폴더의 .pth 파일을 자동으로 탐색·로드합니다.
 
     - .pth 없음   → Placeholder 모드 (시뮬레이션 예측값 반환)
     - .pth 있음   → 실제 모델 추론
@@ -148,7 +159,7 @@ async def lifespan(app: FastAPI):
 
     if not loaded_any:
         print("\n   ⚠️  모든 모델이 Placeholder 모드로 동작합니다.")
-        print("   Colab에서 학습 후 .pth 파일을 checkpoints/ 에 저장하세요.\n")
+        print("   Colab에서 학습 후 .pth 파일을 checkpoints/<model>/ 에 저장하세요.\n")
 
     app.state.loaded_models = [k for k, v in _model_registry.items() if v is not None]
     yield
@@ -164,7 +175,7 @@ app = FastAPI(
     description=(
         "흉부 X-ray 컴퓨터 보조 진단 API.\n\n"
         "**지원 모델**: Ensemble, DenseNet-121, EfficientNet-B4, ViT-B/16\n\n"
-        "모델 가중치는 Colab 학습 후 `checkpoints/` 폴더에 `.pth` 파일로 배치합니다.\n"
+        "모델 가중치는 Colab 학습 후 `checkpoints/<model>/` 서브폴더에 `.pth` 파일로 배치합니다.\n"
         "가중치 파일이 없으면 Placeholder 모드로 동작합니다."
     ),
     version=API_VERSION,

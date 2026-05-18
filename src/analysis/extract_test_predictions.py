@@ -20,7 +20,7 @@ def main(args):
     # 1. 모델 로드
     model_key = args.model
     model = build_model(model_key)
-    ckpt_path = os.path.join(args.checkpoint_dir, f"{model_key}_best.pth")
+    ckpt_path = os.path.join(args.checkpoint_dir, model_key, f"{model_key}_best.pth")
     if not os.path.exists(ckpt_path):
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
     
@@ -88,10 +88,10 @@ def main(args):
 
     # 5. CSV 저장
     out_df = pd.DataFrame(results)
-    out_path = os.path.join(args.checkpoint_dir, "test_predictions.csv")
+    out_path = os.path.join(args.checkpoint_dir, model_key, "test_predictions.csv")
     out_df.to_csv(out_path, index=False)
     print(f"\n✅ Successfully saved predictions to {out_path}")
-    print("이 파일을 로컬 컴퓨터의 checkpoints/ 폴더로 복사한 뒤, 로컬에서 Jupyter Notebook 들을 실행하세요!")
+    print(f"이 파일을 로컬 컴퓨터의 checkpoints/{model_key}/ 폴더로 복사한 뒤, 로컬에서 Jupyter Notebook 들을 실행하세요!")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -55,7 +55,7 @@ train:
   early_stopping_patience: 7
   use_amp: true # Mixed Precision (torch.amp.autocast)
   grad_clip: 1.0 # gradient clipping max_norm
-  checkpoint_dir: "checkpoints" # .pth 저장 위치 (gitignore됨)
+  checkpoint_dir: "checkpoints" # 모델별 서브디렉토리 루트 (checkpoints/<model>/ 에 저장)
 
 # ── 모델 ─────────────────────────────────────────────────────────────────────
 model:

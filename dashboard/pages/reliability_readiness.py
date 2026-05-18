@@ -40,12 +40,20 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-CHECKPOINT_DIR = Path(os.environ.get("CHECKPOINT_DIR", "checkpoints"))
+BASE_CHECKPOINT_DIR = Path(os.environ.get("CHECKPOINT_DIR", "checkpoints"))
+
+SUPPORTED_MODELS = {
+    "densenet":     "🔗 DenseNet-121",
+    "efficientnet": "⚡ EfficientNet-B4",
+    "vit":          "🧠 ViT-B/16",
+}
+
+_selected_model = st.session_state.get("reliability_selected_model", "densenet")
+CHECKPOINT_DIR = BASE_CHECKPOINT_DIR / _selected_model
 
 st.title("🛡️ Reliability Readiness")
 st.caption(
-    "기존 파일을 수정하지 않고 추가된 페이지입니다. checkpoints/ 결과물을 읽어 "
-    "배치 준비도 위험 신호를 통합 점검합니다."
+    f"checkpoints/{_selected_model}/ 결과물을 읽어 배치 준비도 위험 신호를 통합 점검합니다."
 )
 
 
@@ -263,7 +271,7 @@ op_df = _load_csv("op_analysis.csv")
 gender_df = _load_csv("gender_subgroup.csv")
 age_df = _load_csv("age_subgroup.csv")
 view_df = _load_csv("view_subgroup.csv")
-ext_df = _load_csv("densenet_domain_shift.csv")
+ext_df = _load_csv("domain_shift.csv")
 region_df = _load_csv("shortcut_regions.csv")
 pred_df = _load_csv("test_predictions.csv")
 
@@ -273,6 +281,14 @@ diseases = [d for d in true_cols if d in prob_cols]
 default_disease = "Cardiomegaly" if "Cardiomegaly" in diseases else diseases[0] if diseases else None
 
 with st.sidebar:
+    st.markdown("### 🤖 분석 모델")
+    st.selectbox(
+        "결과를 볼 모델 선택",
+        options=list(SUPPORTED_MODELS.keys()),
+        format_func=lambda k: SUPPORTED_MODELS[k],
+        key="reliability_selected_model",
+    )
+    st.divider()
     st.markdown("### Data source")
     st.code(str(CHECKPOINT_DIR), language="text")
     loaded = [name for name, df in [
@@ -281,7 +297,7 @@ with st.sidebar:
         ("view_subgroup.csv", view_df),
         ("age_subgroup.csv", age_df),
         ("gender_subgroup.csv", gender_df),
-        ("densenet_domain_shift.csv", ext_df),
+        ("domain_shift.csv", ext_df),
         ("shortcut_regions.csv", region_df),
     ] if not df.empty]
     st.caption("Loaded: " + (", ".join(loaded) if loaded else "none"))
@@ -377,11 +393,12 @@ with left:
         {"signal": "Calibration ECE", "source": "test_predictions.csv", "value": None if not np.isfinite(metrics.get("ece", float("nan"))) else round(metrics["ece"], 4)},
         {"signal": "Youden J / threshold", "source": "test_predictions.csv", "value": None if not np.isfinite(metrics.get("youden_j", float("nan"))) else f"J={metrics['youden_j']:.3f}, threshold={metrics['best_threshold']:.3f}"},
         {"signal": "Subgroup AUROC gap", "source": "view/age/gender_subgroup.csv", "value": None if not np.isfinite(metrics.get("domain_gap_pp", float("nan"))) else f"{metrics['domain_gap_pp']:.1f}pp"},
-        {"signal": "External AUROC drop", "source": "densenet_domain_shift.csv", "value": None if not np.isfinite(metrics.get("external_drop_pp", float("nan"))) else f"{metrics['external_drop_pp']:.1f}pp"},
+        {"signal": "External AUROC drop", "source": "domain_shift.csv", "value": None if not np.isfinite(metrics.get("external_drop_pp", float("nan"))) else f"{metrics['external_drop_pp']:.1f}pp"},
         {"signal": "Shortcut pattern ratio", "source": "shortcut_regions.csv", "value": None if not np.isfinite(metrics.get("shortcut_ratio", float("nan"))) else f"{metrics['shortcut_ratio']:.1%}"},
         {"signal": "Hidden stratification", "source": "test_predictions.csv proxy features", "value": metrics.get("hidden_flagged_count", None)},
     ]
-    st.dataframe(pd.DataFrame(source_rows), hide_index=True, use_container_width=True)
+    df_source = pd.DataFrame(source_rows).astype(str)
+    st.dataframe(df_source, hide_index=True, width="stretch")
 
 with right:
     st.subheader("Integrated readiness issues")
@@ -389,7 +406,7 @@ with right:
     if issues_df.empty:
         st.success("No reliability issues under the current thresholds.")
     else:
-        st.dataframe(issues_df, hide_index=True, use_container_width=True)
+        st.dataframe(issues_df, hide_index=True, width="stretch")
 
 st.divider()
 
@@ -409,7 +426,7 @@ if disease and not pred_df.empty:
         fig.add_trace(go.Scatter(x=cal_df["mean_prob"], y=cal_df["observed_rate"], mode="markers+lines", name="Observed"))
         fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="Perfect calibration", line=dict(dash="dash")))
         fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Mean predicted probability", yaxis_title="Observed positive rate", xaxis=dict(range=[0, 1]), yaxis=dict(range=[0, 1]))
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 st.divider()
 st.subheader("Hidden stratification proxy")
@@ -420,13 +437,13 @@ if hidden_result is not None:
     if not strata_df.empty:
         c1, c2 = st.columns([1, 1])
         with c1:
-            st.dataframe(strata_df, hide_index=True, use_container_width=True)
+            st.dataframe(strata_df, hide_index=True, width="stretch")
         with c2:
             fig = go.Figure()
             fig.add_trace(go.Bar(x=strata_df["stratum_id"].astype(str), y=strata_df["error_rate"], name="Error rate"))
             fig.add_trace(go.Scatter(x=strata_df["stratum_id"].astype(str), y=strata_df["auroc"], mode="lines+markers", name="AUROC", yaxis="y2"))
             fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Proxy stratum", yaxis=dict(title="Error rate", range=[0, 1]), yaxis2=dict(title="AUROC", overlaying="y", side="right", range=[0, 1]), legend=dict(orientation="h", y=1.1))
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     else:
         st.info("Minimum size 조건을 만족하는 strata가 없습니다.")
 else:

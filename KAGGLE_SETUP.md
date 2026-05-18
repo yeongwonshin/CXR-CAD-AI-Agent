@@ -173,7 +173,7 @@ notebooks/09_Error_Analysis.ipynb          # Grad-CAM 기반 FP/FN 오류 분석
 Kaggle에서 노트북 Output을 Dataset으로 만들어 연결:
 ```
 학습 노트북 실행 완료
-  → Notebook Output: /kaggle/working/checkpoints/densenet_best.pth 등
+  → Notebook Output: /kaggle/working/checkpoints/<model>/<model>_best.pth 등
   → 해당 Output을 Dataset으로 저장 (우측 Output 탭 → "New Dataset")
   → 08_External_Validation.ipynb 에서 해당 Dataset 연결
 ```
@@ -200,5 +200,5 @@ Kaggle에서 노트북 Output을 Dataset으로 만들어 연결:
 - [ ] Kaggle Notebook GPU + 인터넷 활성화
 - [ ] 데이터 탐색 및 튜닝 (01~03 노트북 필요에 따라 실행)
 - [ ] `04_Training.ipynb` 실행 대용량 학습 진행
-- [ ] 체크포인트를 Output Dataset으로 묶어서 저장 (`checkpoints/`)
+- [ ] 체크포인트를 Output Dataset으로 묶어서 저장 (`checkpoints/<model>/`)
 - [ ] 이후 심층 분석 및 검증 (05~09 노트북) 실행 시 앞서 저장한 Output Dataset 연동

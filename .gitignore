@@ -75,8 +75,8 @@ instance/
 
 # ── CXR-CAD: 모델 가중치 (절대 커밋 금지) ────────────────────────────────────
 # Colab에서 학습한 .pth / .pt 파일은 Git에 포함하지 않습니다.
-checkpoints/*.pth
-checkpoints/*.pt
+checkpoints/**/*.pth
+checkpoints/**/*.pt
 
 # 데이터셋 (대용량)
 data/
@@ -86,11 +86,11 @@ data/
 .ipynb_checkpoints/
 notebooks/.ipynb_checkpoints/
 
-# 아래 요약 파일들은 예외적으로 허용
-!checkpoints/op_analysis.csv
-!checkpoints/*_subgroup.csv
-!checkpoints/*_domain_shift.csv
-!checkpoints/false_*.csv
-!checkpoints/*.png
-!checkpoints/test_predictions.csv
-!checkpoints/shortcut_regions.csv
+# 아래 요약 파일들은 예외적으로 허용 (서브디렉토리 포함)
+!checkpoints/**/op_analysis.csv
+!checkpoints/**/*_subgroup.csv
+!checkpoints/**/domain_shift.csv
+!checkpoints/**/false_*.csv
+!checkpoints/**/*.png
+!checkpoints/**/test_predictions.csv
+!checkpoints/**/shortcut_regions.csv
