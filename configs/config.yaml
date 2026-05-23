@@ -46,8 +46,8 @@ preprocess:
 # ── 학습 ─────────────────────────────────────────────────────────────────────
 train:
   n_splits: 5 # 5-Fold Cross Validation 설정 추가
-  batch_size: 32 # Kaggle T4(16GB) 기준. OOM 시 16으로 줄임
-  num_workers: 0
+  batch_size: 64 # Kaggle T4(16GB) 기준. OOM 시 16으로 줄임
+  num_workers: 4
   epochs: 20
   lr: 1.0e-4
   weight_decay: 1.0e-5
