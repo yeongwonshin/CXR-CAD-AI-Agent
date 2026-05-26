@@ -1,9 +1,0 @@
-Disease,NIH AUROC,CheXpert AUROC,Gap
-Atelectasis,0.8256,0.7153,-11.0%
-Cardiomegaly,0.9242,0.7948,-12.9%
-Consolidation,0.8268,0.8474,+2.1%
-Edema,0.9236,0.8509,-7.3%
-Effusion,0.8962,0.8417,-5.4%
-Pneumonia,0.7714,0.567,-20.4%
-Pneumothorax,0.8993,0.704,-19.5%
-macro_avg,0.8667,0.7602,-10.7%
