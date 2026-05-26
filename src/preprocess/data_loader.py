@@ -46,7 +46,18 @@ def load_nih_csv(data_root: str) -> pd.DataFrame:
     """
     NIH CSV를 읽어 멀티-핫 레이블 컬럼을 추가한 DataFrame 반환.
     """
-    csv_path = os.path.join(data_root, "Data_Entry_2017.csv")
+    data_root_path = Path(data_root)
+    csv_candidates = [
+        data_root_path / "Data_Entry_2017.csv",
+        data_root_path / "Data_Entry_2017_v2020.csv",
+    ]
+    csv_candidates.extend(sorted(data_root_path.glob("Data_Entry_2017*.csv")))
+    csv_path = next((path for path in csv_candidates if path.exists()), None)
+    if csv_path is None:
+        raise FileNotFoundError(
+            f"NIH metadata CSV not found under {data_root}. "
+            "Expected Data_Entry_2017.csv or Data_Entry_2017*.csv."
+        )
     
     df = pd.read_csv(csv_path)
     

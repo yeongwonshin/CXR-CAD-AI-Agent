@@ -9,6 +9,7 @@ from tqdm import tqdm
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+import src.train.models as model_defs
 from src.train.models import build_model, DISEASE_LABELS
 from src.preprocess.data_loader import build_dataloaders, load_nih_csv, create_dataloader
 from src.preprocess.transforms import get_inference_transforms
@@ -19,6 +20,11 @@ def main(args):
 
     # 1. 모델 로드
     model_key = args.model
+    # Current ViT checkpoints were trained with the torchvision ViT wrapper
+    # (state_dict keys such as backbone.class_token). Keep extraction aligned
+    # even when timm is installed in the local environment.
+    if model_key == "vit":
+        model_defs._TIMM_AVAILABLE = False
     model = build_model(model_key)
     ckpt_path = os.path.join(args.checkpoint_dir, model_key, f"{model_key}_best.pth")
     if not os.path.exists(ckpt_path):
@@ -36,6 +42,8 @@ def main(args):
     # 기존 split 로직(Patient ID 기준)을 그대로 따름
     from src.preprocess.data_loader import split_by_patient
     _, test_df = split_by_patient(df, test_ratio=0.15)
+    if args.limit:
+        test_df = test_df.head(args.limit).reset_index(drop=True)
     
     test_loader = create_dataloader(
         df=test_df,
@@ -88,7 +96,7 @@ def main(args):
 
     # 5. CSV 저장
     out_df = pd.DataFrame(results)
-    out_path = os.path.join(args.checkpoint_dir, model_key, "test_predictions.csv")
+    out_path = os.path.join(args.checkpoint_dir, model_key, args.output_name)
     out_df.to_csv(out_path, index=False)
     print(f"\n✅ Successfully saved predictions to {out_path}")
     print(f"이 파일을 로컬 컴퓨터의 checkpoints/{model_key}/ 폴더로 복사한 뒤, 로컬에서 Jupyter Notebook 들을 실행하세요!")
@@ -100,6 +108,8 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_dir", type=str, default="../checkpoints", help="Path to best.pth")
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--limit", type=int, default=0, help="Optional smoke-test row limit")
+    parser.add_argument("--output_name", type=str, default="test_predictions.csv")
     args = parser.parse_args()
     
     main(args)
