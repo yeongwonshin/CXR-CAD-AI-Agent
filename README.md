@@ -106,6 +106,9 @@ CXR-CAD/
 | `checkpoints/<model_key>/shortcut_regions.csv` | Grad-CAM 기반 Shortcut Learning 분포 분석 |
 | `checkpoints/<model_key>/false_*.csv` | 주요 False Positive / False Negative 오류 사례 |
 
+## 📦 학습된 모델 가중치 파일 (`.pth checkpoints`) 은 아래 Google Drive 링크를 통해 추가로 제공됩니다.  
+> https://drive.google.com/drive/folders/1plw8yetMsk07lFYJAjxJjMwjel4-d-IQ?usp=drive_link
+
 ## 🚀 Quick Start
 
 ### 1. 의존성 설치
