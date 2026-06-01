@@ -35,25 +35,101 @@ else:
 
 st.set_page_config(
     page_title="CXR-CAD | Reliability Readiness",
-    page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded",
+)
+
+
+
+st.markdown(
+    """
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    [data-testid="stAppViewContainer"] {
+        background:
+            radial-gradient(circle at 10% 6%, rgba(20,184,166,0.14), transparent 28%),
+            radial-gradient(circle at 90% 10%, rgba(225,29,72,0.10), transparent 26%),
+            linear-gradient(180deg, #f8fbff 0%, #eef7ff 50%, #f8fafc 100%);
+    }
+    .main .block-container { padding-top: 1.2rem; max-width: 1420px; }
+    [data-testid="stSidebar"] {
+        background:
+            radial-gradient(circle at top left, rgba(56,189,248,0.20), transparent 30%),
+            linear-gradient(180deg, #08111f 0%, #0f172a 52%, #111827 100%);
+        border-right: 1px solid rgba(148,163,184,0.22);
+    }
+    [data-testid="stSidebar"] * { color: #e5edf8 !important; }
+    [data-testid="stSidebar"] hr { border-color: rgba(148,163,184,0.22) !important; }
+    [data-testid="stSidebar"] input { color: #0f172a !important; }
+    .readiness-header {
+        background:
+            radial-gradient(circle at 84% 20%, rgba(125,211,252,0.22), transparent 24%),
+            linear-gradient(135deg, #08111f 0%, #15345f 50%, #0f766e 100%);
+        border: 1px solid rgba(125,211,252,0.24);
+        border-radius: 28px;
+        padding: 1.6rem 2rem;
+        margin-bottom: 1.35rem;
+        box-shadow: 0 24px 58px rgba(15,23,42,0.20);
+    }
+    .readiness-header .eyebrow { color:#a7f3d0 !important; font-size:0.72rem; letter-spacing:0.16em; text-transform:uppercase; font-weight:800; margin-bottom:0.35rem; }
+    .readiness-header h1 { margin:0; font-size:1.72rem; font-weight:850; color:white !important; letter-spacing:-0.03em; }
+    .readiness-header p { margin:0.35rem 0 0; font-size:0.9rem; color:#dbeafe !important; line-height:1.5; }
+    .readiness-badge {
+        border-radius: 18px;
+        padding: 1rem 1.15rem;
+        margin: 0.7rem 0 0.8rem;
+        border: 1px solid rgba(148,163,184,0.24);
+        box-shadow: 0 16px 34px rgba(15,23,42,0.08);
+    }
+    .readiness-badge.pass { background: linear-gradient(135deg, #ecfdf5, #dbeafe); border-color: rgba(20,184,166,0.32); }
+    .readiness-badge.warning { background: linear-gradient(135deg, #fff7ed, #fef3c7); border-color: rgba(245,158,11,0.44); }
+    .readiness-badge.critical { background: linear-gradient(135deg, #fff1f2, #ffe4e6); border-color: rgba(225,29,72,0.36); }
+    .readiness-badge h3 { margin:0; color:#0f172a !important; font-size:1rem; font-weight:850; }
+    .readiness-badge p { margin:0.32rem 0 0; color:#475569 !important; font-size:0.86rem; line-height:1.48; }
+    [data-testid="stMetric"] {
+        background: rgba(255,255,255,0.92);
+        border: 1px solid rgba(148,163,184,0.24);
+        border-radius: 20px;
+        padding: 1rem;
+        box-shadow: 0 16px 34px rgba(15,23,42,0.06);
+    }
+    .sidebar-brand {
+        border: 1px solid rgba(125,211,252,0.22);
+        border-radius: 18px;
+        padding: 1rem;
+        background: linear-gradient(135deg, rgba(15,23,42,0.95), rgba(30,58,138,0.5));
+        box-shadow: 0 18px 48px rgba(8,17,31,0.35);
+        margin-bottom: 0.8rem;
+    }
+    .sidebar-brand h2 { margin:0; font-size:1.12rem; color:white !important; font-weight:850; }
+    .sidebar-brand p { margin:0.32rem 0 0; color:#b6c7dc !important; font-size:0.78rem; line-height:1.45; }
+    #MainMenu {visibility:hidden;} footer {visibility:hidden;} header {visibility:hidden;}
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
 BASE_CHECKPOINT_DIR = Path(os.environ.get("CHECKPOINT_DIR", "checkpoints"))
 
 SUPPORTED_MODELS = {
-    "densenet":     "🔗 DenseNet-121",
-    "efficientnet": "⚡ EfficientNet-B4",
-    "vit":          "🧠 ViT-B/16",
+    "densenet":     "DenseNet-121",
+    "efficientnet": "EfficientNet-B4",
+    "vit":          "ViT-B/16",
 }
 
 _selected_model = st.session_state.get("reliability_selected_model", "densenet")
 CHECKPOINT_DIR = BASE_CHECKPOINT_DIR / _selected_model
 
-st.title("🛡️ Reliability Readiness")
-st.caption(
-    f"checkpoints/{_selected_model}/ 결과물을 읽어 배치 준비도 위험 신호를 통합 점검합니다."
+st.markdown(
+    f"""
+<div class="readiness-header">
+    <div class="eyebrow">Reliability readiness</div>
+    <h1>CXR-CAD — Reliability Readiness</h1>
+    <p>checkpoints/{_selected_model}/ 결과물을 읽어 임상 배치 전 위험 신호를 통합 점검합니다.</p>
+</div>
+""",
+    unsafe_allow_html=True,
 )
 
 
@@ -260,11 +336,18 @@ def _adjustable_report(metrics: dict[str, Any], thresholds: dict[str, Any]) -> d
 
 def _badge(status: str) -> None:
     if status == "critical":
-        st.error("🚫 CRITICAL — 배치 차단 권고")
+        title = "CRITICAL — 배치 차단 권고"
+        body = "중대한 신뢰성 위험이 있어 문제를 해결하기 전까지 배치를 보류하는 상태입니다."
+        css_class = "critical"
     elif status == "warning":
-        st.warning("⚠️ WARNING — 검토 후 제한 배치 권고")
+        title = "WARNING — 검토 후 제한 배치 권고"
+        body = "경고 항목 검토와 보정 후 제한적 배치를 고려해야 하는 상태입니다."
+        css_class = "warning"
     else:
-        st.success("✅ PASS — routine monitoring 권고")
+        title = "PASS — routine monitoring 권고"
+        body = "현재 기준에서는 정기 모니터링 조건으로 배치 가능성이 높은 상태입니다."
+        css_class = "pass"
+    st.markdown(f'<div class="readiness-badge {css_class}"><h3>{title}</h3><p>{body}</p></div>', unsafe_allow_html=True)
 
 
 op_df = _load_csv("op_analysis.csv")
@@ -281,7 +364,8 @@ diseases = [d for d in true_cols if d in prob_cols]
 default_disease = "Cardiomegaly" if "Cardiomegaly" in diseases else diseases[0] if diseases else None
 
 with st.sidebar:
-    st.markdown("### 🤖 분석 모델")
+    st.markdown("""<div class="sidebar-brand"><h2>Reliability Readiness</h2><p>배치 전 신뢰성 위험 신호를 점검합니다.</p></div>""", unsafe_allow_html=True)
+    st.markdown("### 분석 모델")
     st.selectbox(
         "결과를 볼 모델 선택",
         options=list(SUPPORTED_MODELS.keys()),
