@@ -73,11 +73,61 @@ st.markdown("""
             linear-gradient(180deg, #08111f 0%, #0f172a 48%, #111827 100%);
         border-right: 1px solid rgba(148,163,184,0.22);
     }
-    [data-testid="stSidebar"] * { color: #e5edf8 !important; }
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] h4,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stMarkdown,
+    [data-testid="stSidebar"] .stCaption,
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
+        color: #e5edf8 !important;
+    }
     [data-testid="stSidebar"] hr { border-color: rgba(148,163,184,0.22) !important; }
     [data-testid="stSidebar"] .stRadio label,
-    [data-testid="stSidebar"] .stSlider label,
-    [data-testid="stSidebar"] .stFileUploader label { color: #d7e3f4 !important; }
+    [data-testid="stSidebar"] .stSlider label { color: #d7e3f4 !important; }
+
+    /* Sidebar form controls: dark text on light input boxes */
+    [data-testid="stSidebar"] input,
+    [data-testid="stSidebar"] textarea {
+        background: #f8fafc !important;
+        color: #0f172a !important;
+        -webkit-text-fill-color: #0f172a !important;
+        border-color: rgba(148,163,184,0.45) !important;
+        opacity: 1 !important;
+        font-weight: 650 !important;
+    }
+    [data-testid="stSidebar"] input:disabled,
+    [data-testid="stSidebar"] textarea:disabled {
+        color: #334155 !important;
+        -webkit-text-fill-color: #334155 !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stSidebar"] input::placeholder,
+    [data-testid="stSidebar"] textarea::placeholder {
+        color: #64748b !important;
+        -webkit-text-fill-color: #64748b !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="select"] > div {
+        background: #f8fafc !important;
+        border-color: rgba(148,163,184,0.45) !important;
+        color: #0f172a !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="select"] span,
+    [data-testid="stSidebar"] [data-baseweb="select"] input,
+    [data-testid="stSidebar"] [data-baseweb="select"] div {
+        color: #0f172a !important;
+        -webkit-text-fill-color: #0f172a !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="select"] svg {
+        color: #475569 !important;
+        fill: #475569 !important;
+    }
+    div[data-baseweb="popover"] div[role="listbox"] { background: #ffffff !important; }
+    div[data-baseweb="popover"] div[role="option"] { color: #0f172a !important; background: #ffffff !important; }
+    div[data-baseweb="popover"] div[role="option"]:hover { background: #e0f2fe !important; color: #0f172a !important; }
 
     .brand-block {
         border: 1px solid rgba(125,211,252,0.22);
@@ -334,7 +384,7 @@ def create_disease_chart(probs: dict, threshold: float) -> go.Figure:
         y=diseases,
         x=values,
         orientation="h",
-        marker=dict(color=colors, cornerradius=7),
+        marker=dict(color=colors),
         text=[f"{v:.1%}" for v in values],
         textposition="outside",
         textfont=dict(size=11, family="Inter", color="#475569"),
@@ -455,15 +505,6 @@ with st.sidebar:
     )
 
     st.divider()
-    st.markdown("### 이미지 입력")
-    sidebar_uploaded_file = st.file_uploader(
-        "흉부 X-ray 이미지 선택",
-        type=["png", "jpg", "jpeg"],
-        help="PA/AP 전면 흉부 X-ray 이미지(PNG 또는 JPEG)를 선택하세요.",
-        key="xray_uploader_sidebar",
-    )
-
-    st.divider()
     st.markdown("### 판정 설정")
     threshold = st.slider(
         "감지 임계값",
@@ -485,7 +526,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-uploaded_file = sidebar_uploaded_file
+uploaded_file = None
 
 # ── 메인 헤더 ─────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -509,22 +550,24 @@ if uploaded_file is None:
         <div class="upload-kicker">Image input</div>
         <div class="upload-title">아래 업로드 박스를 클릭하거나 이미지를 끌어다 놓으세요.</div>
         <div class="upload-desc">
-            이미지 선택 기능을 메인 화면에서도 크게 보이도록 배치했습니다. 선택한 파일은 FastAPI의 <b>/predict</b> 엔드포인트로 전달되며, 체크포인트가 로드된 경우 실제 모델 추론 결과를, 체크포인트가 없으면 Placeholder 데모 응답을 반환합니다.
+            선택한 파일은 FastAPI의 <b>/predict</b> 엔드포인트로 전달되며, 체크포인트가 로드된 경우 실제 모델 추론 결과를, 체크포인트가 없으면 Placeholder 데모 응답을 반환합니다.
         </div>
         <div class="upload-steps">
-            <div class="upload-step"><b>1. 모델 선택</b><p>사이드바에서 Ensemble, DenseNet, EfficientNet, ViT 중 하나를 선택합니다.</p></div>
+            <div class="upload-step"><b>1. 모델 선택</b><p>왼쪽 사이드바에서 Ensemble, DenseNet, EfficientNet, ViT 중 하나를 선택합니다.</p></div>
             <div class="upload-step"><b>2. 이미지 업로드</b><p>PNG 또는 JPEG 흉부 X-ray 이미지를 선택합니다.</p></div>
             <div class="upload-step"><b>3. 추론 모드 확인</b><p>결과 카드에서 실제 추론인지 Placeholder인지 확인합니다.</p></div>
         </div>
     </div>
     """, unsafe_allow_html=True)
-    main_uploaded_file = st.file_uploader(
-        "X-ray 이미지 선택 또는 이 영역에 드래그 앤 드롭",
-        type=["png", "jpg", "jpeg"],
-        label_visibility="collapsed",
-        help="PA/AP 전면 흉부 X-ray 이미지(PNG 또는 JPEG)",
-        key="xray_uploader_main",
-    )
+    upload_left, upload_center, upload_right = st.columns([1, 2, 1])
+    with upload_center:
+        main_uploaded_file = st.file_uploader(
+            "X-ray 이미지 선택 또는 이 영역에 드래그 앤 드롭",
+            type=["png", "jpg", "jpeg"],
+            label_visibility="collapsed",
+            help="PA/AP 전면 흉부 X-ray 이미지(PNG 또는 JPEG)",
+            key="xray_uploader_main",
+        )
     uploaded_file = main_uploaded_file
 
 # ── 메인 콘텐츠 ───────────────────────────────────────────────────────────────
@@ -579,7 +622,7 @@ else:
     with col_left:
         st.markdown('<div class="section-title">업로드된 이미지</div>', unsafe_allow_html=True)
         st.markdown('<div class="premium-card" style="padding:1.2rem; text-align:center;">', unsafe_allow_html=True)
-        st.image(image, width="stretch", caption=uploaded_file.name)
+        st.image(image, use_column_width=True, caption=uploaded_file.name)
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="section-title">Grad-CAM 시각화</div>', unsafe_allow_html=True)
@@ -592,7 +635,7 @@ else:
             import base64
             cam_bytes = base64.b64decode(result["GradCAM_Base64"])
             st.markdown('<div class="premium-card" style="padding:1.2rem; text-align:center;">', unsafe_allow_html=True)
-            st.image(cam_bytes, width="stretch")
+            st.image(cam_bytes, use_column_width=True)
             st.markdown("""
             <div class="glass-card blue" style="margin-top:1rem;margin-bottom:0;">
                 <b>활성화 맵 해석 방법</b><br>
@@ -681,4 +724,4 @@ else:
             st.markdown('<div class="section-title">전체 질환 확률</div>', unsafe_allow_html=True)
             probs = {label: result[label] for label in DISEASE_LABELS}
             fig = create_disease_chart(probs, threshold)
-            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
