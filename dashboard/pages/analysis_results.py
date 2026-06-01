@@ -27,83 +27,129 @@ from services.llm_analysis import (
 # ── 페이지 설정 ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="CXR-CAD | 분석 결과",
-    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown(
     """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    :root {
+        --navy: #0f172a;
+        --blue: #2563eb;
+        --cyan: #06b6d4;
+        --teal: #14b8a6;
+        --violet: #7c3aed;
+        --amber: #f59e0b;
+        --line: rgba(148,163,184,0.25);
+    }
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    .main .block-container { padding-top: 1rem; }
+    [data-testid="stAppViewContainer"] {
+        background:
+            radial-gradient(circle at 8% 8%, rgba(37,99,235,0.14), transparent 30%),
+            radial-gradient(circle at 92% 12%, rgba(20,184,166,0.13), transparent 28%),
+            linear-gradient(180deg, #f8fbff 0%, #eef7ff 48%, #f8fafc 100%);
+    }
+    .main .block-container { padding-top: 1.2rem; max-width: 1420px; }
+    [data-testid="stSidebar"] {
+        background:
+            radial-gradient(circle at top left, rgba(56,189,248,0.22), transparent 30%),
+            linear-gradient(180deg, #08111f 0%, #0f172a 52%, #111827 100%);
+        border-right: 1px solid rgba(148,163,184,0.22);
+    }
+    [data-testid="stSidebar"] * { color: #e5edf8 !important; }
+    [data-testid="stSidebar"] hr { border-color: rgba(148,163,184,0.22) !important; }
+    [data-testid="stSidebar"] input { color: #0f172a !important; }
+
+    .main-header {
+        background:
+            radial-gradient(circle at 84% 20%, rgba(125,211,252,0.25), transparent 24%),
+            linear-gradient(135deg, #08111f 0%, #15345f 54%, #0f766e 100%);
+        border: 1px solid rgba(125,211,252,0.24);
+        border-radius: 28px;
+        padding: 1.6rem 2rem;
+        margin-bottom: 1.5rem;
+        color: white;
+        box-shadow: 0 24px 58px rgba(15,23,42,0.20);
+    }
+    .main-header .eyebrow { color:#a7f3d0 !important; font-size:0.72rem; letter-spacing:0.16em; text-transform:uppercase; font-weight:800; margin-bottom:0.35rem; }
+    .main-header h1 { margin:0; font-size:1.72rem; font-weight:850; color:white !important; letter-spacing:-0.03em; }
+    .main-header p  { margin:0.35rem 0 0; font-size:0.9rem; opacity:0.9; color:#dbeafe !important; line-height:1.5; }
 
     .metric-card {
-        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-        border: 1px solid #e2e8f0;
-        border-radius: 16px;
-        padding: 1.2rem 1.5rem;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+        background: linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(239,246,255,0.9) 100%);
+        border: 1px solid rgba(125,211,252,0.36);
+        border-radius: 20px;
+        padding: 1.25rem 1.5rem;
+        box-shadow: 0 16px 34px rgba(15,23,42,0.08);
         margin-bottom: 0.8rem;
         text-align: center;
+        backdrop-filter: blur(10px);
     }
-    .metric-card .value {
-        font-size: 2rem; font-weight: 700; margin: 0;
-    }
-    .metric-card .label {
-        font-size: 0.75rem; text-transform: uppercase; letter-spacing:1.5px;
-        color: #64748b; margin-top: 0.2rem;
-    }
+    .metric-card .value { font-size: 2.05rem; font-weight: 850; margin: 0; letter-spacing:-0.03em; }
+    .metric-card .label { font-size: 0.74rem; text-transform: uppercase; letter-spacing:1.3px; color: #64748b; margin-top: 0.25rem; font-weight:750; }
+
     .section-header {
-        font-size: 1.15rem; font-weight: 700; color: #0f172a;
+        font-size: 1.12rem; font-weight: 850; color: #0f172a;
         margin: 1.5rem 0 0.75rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 2px solid #e2e8f0;
+        padding-bottom: 0.58rem;
+        border-bottom: 1px solid rgba(148,163,184,0.28);
+        display:flex; align-items:center; gap:0.5rem;
+    }
+    .section-header::before {
+        content:""; width:0.55rem; height:0.55rem; border-radius:999px;
+        background: linear-gradient(135deg, var(--blue), var(--teal));
+        box-shadow: 0 0 0 5px rgba(14,165,233,0.12);
     }
     .analysis-card {
-        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-        border: 1px solid #e2e8f0;
-        border-radius: 16px;
+        background: rgba(255,255,255,0.92);
+        border: 1px solid rgba(148,163,184,0.24);
+        border-radius: 22px;
         padding: 1.5rem;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+        box-shadow: 0 18px 42px rgba(15,23,42,0.08);
         margin-bottom: 1rem;
+        backdrop-filter: blur(10px);
     }
     .insight-box {
-        background: linear-gradient(135deg, #eff6ff, #dbeafe);
-        border: 1px solid #93c5fd;
-        border-radius: 12px;
-        padding: 1rem 1.2rem;
+        background: linear-gradient(135deg, #eff6ff, #ecfeff);
+        border: 1px solid rgba(125,211,252,0.55);
+        border-radius: 16px;
+        padding: 1rem 1.15rem;
         margin: 0.5rem 0;
         font-size: 0.9rem;
-        color: #1e3a5f;
+        color: #0f4c81;
+        box-shadow: 0 12px 26px rgba(14,165,233,0.08);
     }
     .warning-box {
-        background: linear-gradient(135deg, #fef3c7, #fde68a);
-        border: 1px solid #f59e0b;
-        border-radius: 12px;
-        padding: 1rem 1.2rem;
+        background: linear-gradient(135deg, #fff7ed, #fef3c7);
+        border: 1px solid rgba(245,158,11,0.45);
+        border-radius: 16px;
+        padding: 1rem 1.15rem;
         margin: 0.5rem 0;
         font-size: 0.9rem;
         color: #78350f;
+        box-shadow: 0 12px 26px rgba(245,158,11,0.10);
     }
     .llm-box {
         background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
-        border: 1px solid #c7d2fe;
-        border-radius: 16px;
+        border: 1px solid rgba(167,139,250,0.38);
+        border-radius: 20px;
         padding: 1.2rem 1.3rem;
         margin-top: 0.6rem;
+        box-shadow: 0 18px 42px rgba(15,23,42,0.06);
     }
-    .main-header {
-        background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
-        border-radius: 16px;
-        padding: 1.5rem 2rem;
-        margin-bottom: 1.5rem;
-        color: white;
+    .sidebar-brand {
+        border: 1px solid rgba(125,211,252,0.22);
+        border-radius: 18px;
+        padding: 1rem;
+        background: linear-gradient(135deg, rgba(15,23,42,0.95), rgba(30,58,138,0.5));
+        box-shadow: 0 18px 48px rgba(8,17,31,0.35);
     }
-    .main-header h1 { margin:0; font-size:1.6rem; font-weight:700; color:white !important; }
-    .main-header p  { margin:0.25rem 0 0; font-size:0.85rem; opacity:0.7; color:#94a3b8 !important; }
+    .sidebar-brand h2 { margin:0; font-size:1.12rem; color:white !important; font-weight:850; }
+    .sidebar-brand p { margin:0.32rem 0 0; color:#b6c7dc !important; font-size:0.78rem; line-height:1.45; }
 
     #MainMenu {visibility:hidden;} footer {visibility:hidden;} header {visibility:hidden;}
 </style>
@@ -117,9 +163,9 @@ BASE_CHECKPOINT_DIR = Path(os.environ.get("CHECKPOINT_DIR", "checkpoints"))
 DEFAULT_LLM_MODEL  = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 
 SUPPORTED_MODELS = {
-    "densenet":    "🔗 DenseNet-121",
-    "efficientnet": "⚡ EfficientNet-B4",
-    "vit":         "🧠 ViT-B/16",
+    "densenet":    "DenseNet-121",
+    "efficientnet": "EfficientNet-B4",
+    "vit":         "ViT-B/16",
 }
 
 
@@ -414,7 +460,7 @@ def heuristic_summary(metric_key: str) -> str:
 
 
 def render_llm_section(metric_key: str, metric_title: str, metric_context: str) -> None:
-    st.markdown('<div class="section-header">🤖 LLM 결론 및 자료 해석</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">LLM 결론 및 자료 해석</div>', unsafe_allow_html=True)
 
     api_key = st.session_state.get("analysis_openai_api_key", "").strip()
     model_name = st.session_state.get("analysis_openai_model", DEFAULT_LLM_MODEL).strip() or DEFAULT_LLM_MODEL
@@ -453,7 +499,7 @@ def render_llm_section(metric_key: str, metric_title: str, metric_context: str) 
             st.markdown("### 임시 해석\n" + heuristic_summary(metric_key))
             st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="section-header">💬 LLM에 질문하기</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">LLM에 질문하기</div>', unsafe_allow_html=True)
     with st.form(key=f"qa_form_{metric_key}"):
         question = st.text_area(
             "현재 화면의 지표에 대해 질문하세요.",
@@ -498,7 +544,7 @@ def render_llm_section(metric_key: str, metric_title: str, metric_context: str) 
 
 # ── 화면별 렌더 함수 ───────────────────────────────────────────────────────────
 def render_operating_point() -> str:
-    st.markdown('<div class="section-header">1️⃣ Operating Point 분석 (Cardiomegaly)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">1. Operating Point 분석 (Cardiomegaly)</div>', unsafe_allow_html=True)
     k1, k2, k3 = st.columns(3)
     with k1:
         metric_card("권장 스크리닝 Threshold", f"{EXAMPLE_OP.loc[1, 'Threshold']:.2f}", "#2563eb")
@@ -512,7 +558,7 @@ def render_operating_point() -> str:
         st.plotly_chart(chart_operating_point(EXAMPLE_OP), width="stretch", config={"displayModeBar": False})
     with c2:
         st.dataframe(EXAMPLE_OP, hide_index=True, width="stretch")
-        tab_screen, tab_confirm = st.tabs(["🏥 스크리닝", "🔬 확진 보조"])
+        tab_screen, tab_confirm = st.tabs(["스크리닝", "확진 보조"])
         with tab_screen:
             st.markdown(
                 """
@@ -538,7 +584,7 @@ def render_operating_point() -> str:
 
 
 def render_gender() -> str:
-    st.markdown('<div class="section-header">2️⃣ Subgroup Analysis — Gender</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">2. Subgroup Analysis — Gender</div>', unsafe_allow_html=True)
     c1, c2 = st.columns([3, 2])
     with c1:
         st.plotly_chart(chart_subgroup_gender(EXAMPLE_GENDER), width="stretch", config={"displayModeBar": False})
@@ -558,7 +604,7 @@ def render_gender() -> str:
 
 
 def render_age() -> str:
-    st.markdown('<div class="section-header">3️⃣ Subgroup Analysis — Age Group</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">3. Subgroup Analysis — Age Group</div>', unsafe_allow_html=True)
     c1, c2 = st.columns([3, 2])
     with c1:
         st.plotly_chart(chart_subgroup_age(EXAMPLE_AGE), width="stretch", config={"displayModeBar": False})
@@ -567,7 +613,7 @@ def render_age() -> str:
         st.markdown(
             """
             <div class="insight-box">
-            📊 40-60세가 최다 학습 데이터 → 최적 성능<br>
+            40-60세가 최다 학습 데이터 → 최적 성능<br>
             60+ 그룹은 동반질환 복잡성으로 성능 하락 가능성
             </div>
             """,
@@ -578,7 +624,7 @@ def render_age() -> str:
 
 
 def render_view() -> str:
-    st.markdown('<div class="section-header">4️⃣ Subgroup Analysis — View Position</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">4. Subgroup Analysis — View Position</div>', unsafe_allow_html=True)
     c1, c2 = st.columns([3, 2])
     with c1:
         st.plotly_chart(chart_subgroup_view(EXAMPLE_VIEW), width="stretch", config={"displayModeBar": False})
@@ -587,7 +633,7 @@ def render_view() -> str:
         st.markdown(
             """
             <div class="warning-box">
-            ⚠️ <b>PA/AP 간 성능 차이 5.2%</b><br>
+            <b>PA/AP 간 성능 차이 5.2%</b><br>
             AP는 이동식 응급 촬영이 많아 영상 품질과 분포가 다를 수 있습니다.<br>
             <b>권장:</b> AP 영상 별도 증강 또는 도메인 적응 적용
             </div>
@@ -599,7 +645,7 @@ def render_view() -> str:
 
 
 def render_external_validation() -> str:
-    st.markdown('<div class="section-header">5️⃣ External Validation (CheXpert)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">5. External Validation (CheXpert)</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
         st.plotly_chart(chart_external_val(EXAMPLE_EXT), width="stretch", config={"displayModeBar": False})
@@ -639,7 +685,7 @@ def render_external_validation() -> str:
 
 
 def render_domain_gap() -> str:
-    st.markdown('<div class="section-header">6️⃣ Domain Shift Gap</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">6. Domain Shift Gap</div>', unsafe_allow_html=True)
     st.plotly_chart(chart_domain_gap(EXAMPLE_EXT), width="stretch", config={"displayModeBar": False})
     st.dataframe(EXAMPLE_EXT[["Disease", "Gap"]], hide_index=True, width="stretch")
     st.markdown(
@@ -656,8 +702,8 @@ def render_domain_gap() -> str:
 
 
 def render_error_cases() -> str:
-    st.markdown('<div class="section-header">7️⃣ Error Analysis — False Positive / False Negative</div>', unsafe_allow_html=True)
-    tab_fp, tab_fn = st.tabs(["🔴 False Positive Top 5", "🔵 False Negative Top 5"])
+    st.markdown('<div class="section-header">7. Error Analysis — False Positive / False Negative</div>', unsafe_allow_html=True)
+    tab_fp, tab_fn = st.tabs(["False Positive Top 5", "False Negative Top 5"])
     with tab_fp:
         st.dataframe(FALSE_POSITIVE_DF, hide_index=True, width="stretch")
     with tab_fn:
@@ -672,12 +718,12 @@ def render_error_cases() -> str:
 
 
 def render_region_shift() -> str:
-    st.markdown('<div class="section-header">8️⃣ Error Analysis — 폐 영역 이탈 분석</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">8. Error Analysis — 폐 영역 이탈 분석</div>', unsafe_allow_html=True)
     st.plotly_chart(chart_region_shift(REGION_DF), width="stretch", config={"displayModeBar": False})
     st.markdown(
         """
         <div class="warning-box">
-        ⚠️ <b>Shortcut Learning 의심:</b> 의료기기(8건) + 텍스트/마커(5건) = 13건<br>
+        <b>Shortcut Learning 의심:</b> 의료기기(8건) + 텍스트/마커(5건) = 13건<br>
         <b>개선 방향:</b> 폐 영역 마스킹, attention 제약, artifact suppression 검토
         </div>
         """,
@@ -705,7 +751,8 @@ METRIC_PAGES: OrderedDict[str, dict[str, str | Callable[[], str]]] = OrderedDict
 st.markdown(
     """
 <div class="main-header">
-    <h1>📊 CXR-CAD — 분석 결과 대시보드</h1>
+    <div class="eyebrow">Analysis results</div>
+    <h1>CXR-CAD — 분석 결과 대시보드</h1>
     <p>지표별 화면 전환 · 모델 성능 비교 · LLM 기반 자료 해석 및 질의응답</p>
 </div>
 """,
@@ -715,28 +762,27 @@ st.markdown(
 
 # ── 사이드바 ──────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 📊 분석 결과")
-    st.markdown("*지표별 분석 화면*")
+    st.markdown("""<div class="sidebar-brand"><h2>분석 결과</h2><p>지표별 분석 화면과 LLM 해석을 제공합니다.</p></div>""", unsafe_allow_html=True)
     st.divider()
 
     # ── 모델 선택기 ──────────────────────────────────────────────────────────
-    st.markdown("### 🤖 분석 모델")
+    st.markdown("### 분석 모델")
     st.selectbox(
         "결과를 볼 모델 선택",
         options=list(SUPPORTED_MODELS.keys()),
         format_func=lambda k: SUPPORTED_MODELS[k],
         key="analysis_selected_model",
     )
-    st.caption(f"📂 `checkpoints/{st.session_state['analysis_selected_model']}/`")
+    st.caption(f"Data path: `checkpoints/{st.session_state['analysis_selected_model']}/`")
 
     has_real = any(
         (CHECKPOINT_DIR / f).exists()
         for f in ["test_predictions.csv", "op_analysis.csv"]
     )
     if has_real:
-        st.success("✅ 실제 결과 데이터 감지됨")
+        st.success("실제 결과 데이터가 감지되었습니다.")
     else:
-        st.info("ℹ️ 결과 없음 — 학습 후 체크포인트를 배치하세요.")
+        st.info("결과 없음 — 학습 후 체크포인트를 배치하세요.")
 
     st.divider()
     selected_metric = st.radio(
@@ -746,7 +792,7 @@ with st.sidebar:
     )
 
     st.divider()
-    st.markdown("### 🤖 LLM 설정")
+    st.markdown("### LLM 설정")
     st.text_input(
         "OpenAI API Key",
         key="analysis_openai_api_key",
