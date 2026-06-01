@@ -598,7 +598,7 @@ if uploaded_file is None:
         <div class="glass-card blue">
             <div class="section-title">현재 실행 상태</div>
             <p style="color:#475569;margin:0;line-height:1.6;">
-                {api_text} 현재 표시 모드는 <b>{health_text}</b>입니다. 이 상태 문구를 먼저 확인하면, 실제 모델을 실행하는지 데모 응답을 보여주는지 바로 구분할 수 있습니다.
+                {api_text} 현재 표시 모드는 <b>{health_text}</b>입니다. 
             </p>
         </div>
         """,
