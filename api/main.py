@@ -410,4 +410,5 @@ async def predict(
         Inference_Time_ms  = inference_ms,
         Model_Used         = model_name,
         Model_Key          = model_key,
+        Is_Placeholder     = is_placeholder,
     )
