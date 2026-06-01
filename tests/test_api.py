@@ -107,6 +107,8 @@ class TestPredictEndpoint:
         assert "Top_Disease" in data
         assert "Model_Used" in data
         assert "Model_Key" in data
+        assert "Is_Placeholder" in data
+        assert isinstance(data["Is_Placeholder"], bool)
         assert data["Model_Key"] == "densenet"
 
     def test_predict_invalid_model_returns_400(self):
