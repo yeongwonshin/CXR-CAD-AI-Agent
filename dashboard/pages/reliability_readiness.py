@@ -59,9 +59,62 @@ st.markdown(
             linear-gradient(180deg, #08111f 0%, #0f172a 52%, #111827 100%);
         border-right: 1px solid rgba(148,163,184,0.22);
     }
-    [data-testid="stSidebar"] * { color: #e5edf8 !important; }
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] h4,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stMarkdown,
+    [data-testid="stSidebar"] .stCaption,
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
+        color: #e5edf8 !important;
+    }
     [data-testid="stSidebar"] hr { border-color: rgba(148,163,184,0.22) !important; }
-    [data-testid="stSidebar"] input { color: #0f172a !important; }
+    [data-testid="stSidebar"] input,
+    [data-testid="stSidebar"] textarea {
+        background: #f8fafc !important;
+        color: #0f172a !important;
+        -webkit-text-fill-color: #0f172a !important;
+        border-color: rgba(148,163,184,0.45) !important;
+        opacity: 1 !important;
+        font-weight: 650 !important;
+    }
+    [data-testid="stSidebar"] input:disabled,
+    [data-testid="stSidebar"] textarea:disabled {
+        color: #334155 !important;
+        -webkit-text-fill-color: #334155 !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="select"] > div {
+        background: #f8fafc !important;
+        border-color: rgba(148,163,184,0.45) !important;
+        color: #0f172a !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="select"] span,
+    [data-testid="stSidebar"] [data-baseweb="select"] input,
+    [data-testid="stSidebar"] [data-baseweb="select"] div {
+        color: #0f172a !important;
+        -webkit-text-fill-color: #0f172a !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="select"] svg {
+        color: #475569 !important;
+        fill: #475569 !important;
+    }
+    div[data-baseweb="popover"] div[role="listbox"] { background: #ffffff !important; }
+    div[data-baseweb="popover"] div[role="option"] { color: #0f172a !important; background: #ffffff !important; }
+    div[data-baseweb="popover"] div[role="option"]:hover { background: #e0f2fe !important; color: #0f172a !important; }
+    .readonly-field {
+        background: #f8fafc;
+        color: #0f172a !important;
+        border: 1px solid rgba(148,163,184,0.45);
+        border-radius: 12px;
+        padding: 0.85rem 1rem;
+        font-weight: 800;
+        font-size: 0.92rem;
+        overflow-wrap: anywhere;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.9);
+    }
     .readiness-header {
         background:
             radial-gradient(circle at 84% 20%, rgba(125,211,252,0.22), transparent 24%),
@@ -374,7 +427,7 @@ with st.sidebar:
     )
     st.divider()
     st.markdown("### Data source")
-    st.code(str(CHECKPOINT_DIR), language="text")
+    st.markdown(f'<div class="readonly-field">{CHECKPOINT_DIR}</div>', unsafe_allow_html=True)
     loaded = [name for name, df in [
         ("op_analysis.csv", op_df),
         ("test_predictions.csv", pred_df),
@@ -482,7 +535,7 @@ with left:
         {"signal": "Hidden stratification", "source": "test_predictions.csv proxy features", "value": metrics.get("hidden_flagged_count", None)},
     ]
     df_source = pd.DataFrame(source_rows).astype(str)
-    st.dataframe(df_source, hide_index=True, width="stretch")
+    st.dataframe(df_source, hide_index=True, use_container_width=True)
 
 with right:
     st.subheader("Integrated readiness issues")
@@ -490,7 +543,7 @@ with right:
     if issues_df.empty:
         st.success("No reliability issues under the current thresholds.")
     else:
-        st.dataframe(issues_df, hide_index=True, width="stretch")
+        st.dataframe(issues_df, hide_index=True, use_container_width=True)
 
 st.divider()
 
@@ -510,7 +563,7 @@ if disease and not pred_df.empty:
         fig.add_trace(go.Scatter(x=cal_df["mean_prob"], y=cal_df["observed_rate"], mode="markers+lines", name="Observed"))
         fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="Perfect calibration", line=dict(dash="dash")))
         fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Mean predicted probability", yaxis_title="Observed positive rate", xaxis=dict(range=[0, 1]), yaxis=dict(range=[0, 1]))
-        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 st.divider()
 st.subheader("Hidden stratification proxy")
@@ -521,13 +574,13 @@ if hidden_result is not None:
     if not strata_df.empty:
         c1, c2 = st.columns([1, 1])
         with c1:
-            st.dataframe(strata_df, hide_index=True, width="stretch")
+            st.dataframe(strata_df, hide_index=True, use_container_width=True)
         with c2:
             fig = go.Figure()
             fig.add_trace(go.Bar(x=strata_df["stratum_id"].astype(str), y=strata_df["error_rate"], name="Error rate"))
             fig.add_trace(go.Scatter(x=strata_df["stratum_id"].astype(str), y=strata_df["auroc"], mode="lines+markers", name="AUROC", yaxis="y2"))
             fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Proxy stratum", yaxis=dict(title="Error rate", range=[0, 1]), yaxis2=dict(title="AUROC", overlaying="y", side="right", range=[0, 1]), legend=dict(orientation="h", y=1.1))
-            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     else:
         st.info("Minimum size 조건을 만족하는 strata가 없습니다.")
 else:
