@@ -47,7 +47,8 @@ class PredictionResult(BaseModel):
 
     # ── 모델 정보 ────────────────────────────────────────────────────────────
     Model_Used:        str        = Field(..., description="사용된 모델 이름 (예: DenseNet-121)")
-    Model_Key:         str        = Field(..., description="모델 키 (densenet / efficientnet / vit)")
+    Model_Key:         str        = Field(..., description="모델 키 (ensemble / densenet / efficientnet / vit)")
+    Is_Placeholder:    bool       = Field(..., description="True이면 실제 체크포인트 추론이 아니라 Placeholder 데모 응답")
 
     model_config = {
         "json_schema_extra": {
@@ -64,6 +65,7 @@ class PredictionResult(BaseModel):
                 "Inference_Time_ms": 312,
                 "Model_Used": "DenseNet-121",
                 "Model_Key": "densenet",
+                "Is_Placeholder": True,
             }]
         }
     }
