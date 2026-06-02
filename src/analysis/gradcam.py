@@ -118,10 +118,14 @@ class GradCAM:
         grad = gradients[0, 1:]  # (N, C)
         act  = activations[0, 1:]  # (N, C)
 
-        weights = grad.mean(dim=-1)  # (N,)
-        cam = (weights.unsqueeze(-1) * act).sum(dim=-1)  # (N,)
-        cam = torch.relu(cam).cpu().numpy()
+        #weights = grad.mean(dim=-1)  # (N,)
+        #cam = (weights.unsqueeze(-1) * act).sum(dim=-1)  # (N,)
+        #cam = torch.relu(cam).cpu().numpy()
 
+        weights = grad.mean(dim=-1)          # (N,)
+        cam = (weights.unsqueeze(-1) * act).sum(dim=-1)  # (N,)
+        cam = cam.abs().cpu().numpy()
+        
         # 패치를 2D grid로 복원 (14×14 for ViT-B/16 + 224×224 input)
         n_patches = cam.shape[0]
         grid_size = int(n_patches ** 0.5)
