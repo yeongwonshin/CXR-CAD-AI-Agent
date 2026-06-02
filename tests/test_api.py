@@ -108,8 +108,16 @@ class TestPredictEndpoint:
         assert "Model_Used" in data
         assert "Model_Key" in data
         assert "Is_Placeholder" in data
+        assert "Case_ID" in data
+        assert "Report_Draft" in data
+        assert "Findings_KR" in data
+        assert "Impression_KR" in data
+        assert "Need_Review_Reason" in data
+        assert "Clinical_Report" in data
         assert isinstance(data["Is_Placeholder"], bool)
         assert data["Model_Key"] == "densenet"
+        assert data["Case_ID"].startswith("CXR-")
+        assert "소견:" in data["Report_Draft"]
 
     def test_predict_invalid_model_returns_400(self):
         """POST /predict?model=invalid → 400 Bad Request."""
@@ -127,6 +135,52 @@ class TestPredictEndpoint:
             files={"file": ("empty.png", b"", "image/png")},
         )
         assert resp.status_code == 400
+
+
+class TestFeedbackEndpoint:
+
+    def test_feedback_save_returns_200(self, tmp_path, monkeypatch):
+        """POST /feedback → 의료진 피드백 JSONL 큐 저장."""
+        import api.main as api_main
+
+        monkeypatch.setattr(api_main, "FEEDBACK_QUEUE_PATH", tmp_path / "feedback_queue.jsonl")
+        payload = {
+            "case_id": "CXR-TEST123456",
+            "feedback_type": "AI 판단 동의",
+            "original_top_disease": "Cardiomegaly",
+            "corrected_labels": [],
+            "comment": "AI 판단에 동의합니다.",
+            "reviewer_id": "RAD01",
+            "model_key": "densenet",
+            "threshold": 0.3,
+            "prediction_summary": {"top_probability": 0.85},
+        }
+        resp = client.post("/feedback", json=payload)
+        data = resp.json()
+        assert resp.status_code == 200
+        assert data["status"] == "saved"
+        assert data["queue_size"] == 1
+        assert data["queue_id"].startswith("FB-")
+
+    def test_feedback_queue_returns_items(self, tmp_path, monkeypatch):
+        """GET /feedback/queue → 최근 검수 큐 항목 반환."""
+        import api.main as api_main
+
+        monkeypatch.setattr(api_main, "FEEDBACK_QUEUE_PATH", tmp_path / "feedback_queue.jsonl")
+        payload = {
+            "case_id": "CXR-TEST123456",
+            "feedback_type": "판독의 코멘트",
+            "comment": "추가 확인 필요",
+            "model_key": "densenet",
+            "threshold": 0.3,
+            "prediction_summary": {},
+        }
+        client.post("/feedback", json=payload)
+        resp = client.get("/feedback/queue?limit=5")
+        data = resp.json()
+        assert resp.status_code == 200
+        assert data["total_count"] == 1
+        assert data["items"][0]["case_id"] == "CXR-TEST123456"
 
 
 if __name__ == "__main__":

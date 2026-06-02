@@ -23,10 +23,13 @@ FastAPI 엔드포인트:
 from __future__ import annotations
 
 import io
+import json
 import os
 import random
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -35,7 +38,14 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 
-from api.schemas import HealthResponse, ModelInfoResponse, PredictionResult
+from api.schemas import (
+    FeedbackQueueResponse,
+    FeedbackRequest,
+    FeedbackResponse,
+    HealthResponse,
+    ModelInfoResponse,
+    PredictionResult,
+)
 from src.preprocess.dicom_utils import dicom_to_pil, is_dicom
 from src.preprocess.transforms import preprocess_single_image
 from src.train.models import (
@@ -48,6 +58,7 @@ from src.train.models import (
 # ── 설정 ─────────────────────────────────────────────────────────────────────
 
 CHECKPOINT_DIR      = Path(os.getenv("CHECKPOINT_DIR", "checkpoints"))
+FEEDBACK_QUEUE_PATH = Path(os.getenv("FEEDBACK_QUEUE_PATH", "data/feedback_queue.jsonl"))
 DETECTION_THRESHOLD = 0.3
 API_VERSION         = "0.2.0"
 DEVICE              = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -233,6 +244,179 @@ def _placeholder_predict(model_key: str) -> Dict[str, float]:
     }
 
 
+# ── AI 판독문 초안 생성 ─────────────────────────────────────────────────────
+
+DISEASE_KR: Dict[str, str] = {
+    "Atelectasis": "무기폐",
+    "Cardiomegaly": "심비대",
+    "Effusion": "흉수",
+    "Infiltration": "폐 침윤",
+    "Mass": "종괴",
+    "Nodule": "결절",
+    "Pneumonia": "폐렴",
+    "Pneumothorax": "기흉",
+    "Consolidation": "경화",
+    "Edema": "폐부종",
+    "Emphysema": "폐기종",
+    "Fibrosis": "섬유화",
+    "Pleural_Thickening": "흉막 비후",
+    "Hernia": "탈장",
+}
+
+
+DISEASE_REPORT_HINTS_KR: Dict[str, str] = {
+    "Atelectasis": "폐 용적 감소 또는 선상 음영 여부를 확인하십시오.",
+    "Cardiomegaly": "심장 음영 확대와 촬영 자세/AP portable 여부를 함께 확인하십시오.",
+    "Effusion": "늑골횡격막각 둔화 또는 흉막강 액체 저류 가능성을 확인하십시오.",
+    "Infiltration": "국소 또는 미만성 폐 음영 증가 여부를 확인하십시오.",
+    "Mass": "국소 종괴성 음영이 실제 병변인지 추가 영상 또는 과거 영상과 비교하십시오.",
+    "Nodule": "작은 결절성 음영 여부와 과거 영상 대비 변화를 확인하십시오.",
+    "Pneumonia": "감염성 침윤 또는 경화 가능성을 임상 증상과 함께 확인하십시오.",
+    "Pneumothorax": "흉막선과 폐혈관 음영 소실 여부를 우선 확인하십시오.",
+    "Consolidation": "폐포성 경화 음영 및 air bronchogram 가능성을 확인하십시오.",
+    "Edema": "혈관 울혈, 간질성 음영 증가, 심부전 관련 소견을 함께 확인하십시오.",
+    "Emphysema": "과팽창, 혈관 음영 감소 등 만성 폐쇄성 변화 가능성을 확인하십시오.",
+    "Fibrosis": "망상 음영 또는 구조 왜곡 여부를 과거 영상과 비교하십시오.",
+    "Pleural_Thickening": "흉막 비후 또는 흉막 병변 가능성을 확인하십시오.",
+    "Hernia": "횡격막 주변 비정상 공기/연부조직 음영 여부를 확인하십시오.",
+}
+
+
+DISEASE_REPORT_HINTS_EN: Dict[str, str] = {
+    "Atelectasis": "Check for volume loss or linear opacity.",
+    "Cardiomegaly": "Correlate cardiac silhouette enlargement with projection and portable AP technique.",
+    "Effusion": "Check for blunting of the costophrenic angle or pleural fluid.",
+    "Infiltration": "Review for focal or diffuse increased pulmonary opacity.",
+    "Mass": "Correlate a focal mass-like opacity with prior or additional imaging.",
+    "Nodule": "Review for a small nodular opacity and interval change.",
+    "Pneumonia": "Correlate possible infectious opacity with clinical symptoms.",
+    "Pneumothorax": "Urgently check for a pleural line and absent peripheral vascular markings.",
+    "Consolidation": "Review for air-space opacity or air bronchogram.",
+    "Edema": "Check for vascular congestion or interstitial edema pattern.",
+    "Emphysema": "Review for hyperinflation and reduced vascular markings.",
+    "Fibrosis": "Compare reticular opacity or architectural distortion with prior imaging.",
+    "Pleural_Thickening": "Review for pleural thickening or pleural-based abnormality.",
+    "Hernia": "Check for abnormal diaphragmatic contour or adjacent soft-tissue/air density.",
+}
+
+
+def _pct(value: float) -> str:
+    """확률 값을 판독문용 퍼센트 문자열로 변환합니다."""
+    return f"{value * 100:.1f}%"
+
+
+def _disease_kr(label: str) -> str:
+    return DISEASE_KR.get(label, label.replace("_", " "))
+
+
+def _build_case_id(contents: bytes) -> str:
+    """환자 식별정보 없이 이미지 바이트 기반 케이스 ID를 생성합니다."""
+    return f"CXR-{sha256(contents).hexdigest()[:12].upper()}"
+
+
+def _build_report_draft(
+    probs: Dict[str, float],
+    detected: List[str],
+    top_disease: str,
+    threshold: float,
+    is_placeholder: bool,
+) -> Dict[str, object]:
+    """
+    확률 결과를 의료진이 복사·수정할 수 있는 판독문 초안으로 변환합니다.
+
+    이 초안은 최종 진단이 아니라 판독 보조 텍스트입니다. 의도적으로
+    단정 표현을 피하고, "가능성", "의심", "검토" 중심으로 작성합니다.
+    """
+    sorted_items = sorted(probs.items(), key=lambda item: item[1], reverse=True)
+    top_items = sorted_items[:3]
+    top_prob = probs[top_disease]
+    top_kr = _disease_kr(top_disease)
+    top_findings = [f"{label.replace('_', ' ')} ({_pct(prob)})" for label, prob in top_items]
+    top_findings_kr = [f"{_disease_kr(label)}({_pct(prob)})" for label, prob in top_items]
+
+    if detected:
+        detected_kr = ", ".join(f"{_disease_kr(label)}({_pct(probs[label])})" for label in detected)
+        detected_en = ", ".join(f"{label.replace('_', ' ')} ({_pct(probs[label])})" for label in detected)
+        findings_kr = (
+            f"AI 분석에서 {top_kr} 가능성이 가장 높게 예측되었습니다({_pct(top_prob)}). "
+            f"감지 임계값({_pct(threshold)}) 이상으로 표시된 소견은 {detected_kr}입니다. "
+            f"{DISEASE_REPORT_HINTS_KR.get(top_disease, '원본 영상과 활성화 맵을 함께 확인하십시오')}"
+        )
+        impression_kr = (
+            f"AI는 {top_kr}를 우선 검토 대상으로 제안합니다. "
+            "동반 소견 가능성과 촬영 조건을 고려하여 최종 판독에서 확인하십시오."
+        )
+        findings_en = (
+            f"AI analysis suggests {top_disease.replace('_', ' ')} as the highest-probability finding ({_pct(top_prob)}). "
+            f"Findings above the detection threshold ({_pct(threshold)}) include {detected_en}. "
+            f"{DISEASE_REPORT_HINTS_EN.get(top_disease, 'Review the original image and activation map together.')}"
+        )
+        impression_en = (
+            f"AI suggests {top_disease.replace('_', ' ')} for priority clinician review. "
+            "Please correlate with image quality, projection, prior imaging, and clinical context."
+        )
+    else:
+        findings_kr = (
+            f"감지 임계값({_pct(threshold)}) 이상으로 뚜렷하게 표시된 질환은 없습니다. "
+            f"가장 높은 예측 항목은 {top_kr}({_pct(top_prob)})이며, 현재 설정에서는 낮은 우선순위 검토 대상으로 분류됩니다."
+        )
+        impression_kr = "AI 분석상 임계값 이상 주요 흉부 질환은 감지되지 않았습니다. 단, 최종 판독은 원본 영상과 임상 정보를 바탕으로 의료진이 확인해야 합니다."
+        findings_en = (
+            f"No finding exceeded the detection threshold ({_pct(threshold)}). "
+            f"The highest-probability item was {top_disease.replace('_', ' ')} ({_pct(top_prob)}), classified as low-priority under the current threshold."
+        )
+        impression_en = "No major chest finding exceeded the AI detection threshold. Final interpretation should be confirmed by a clinician using the original image and clinical context."
+
+    if is_placeholder:
+        need_review_reason = "현재 결과는 Placeholder 데모 응답이므로 실제 임상 판단이나 재학습 데이터로 바로 사용하지 말고 UI/워크플로우 검증용으로만 활용하십시오."
+    elif top_disease == "Pneumothorax" and top_prob >= threshold:
+        need_review_reason = "기흉 가능성이 임계값 이상으로 표시되어 긴급 검토가 필요할 수 있습니다."
+    elif top_prob >= 0.75:
+        need_review_reason = "상위 예측 확률이 높아 해당 소견을 우선 확인하는 것이 좋습니다."
+    elif len(detected) >= 3:
+        need_review_reason = "여러 질환이 동시에 임계값 이상으로 표시되어 동반 소견 또는 모델 혼동 가능성을 함께 검토해야 합니다."
+    elif detected:
+        need_review_reason = "임계값 이상 소견이 있으나 확률만으로 확진할 수 없으므로 원본 영상, Grad-CAM, 임상 정보를 함께 확인해야 합니다."
+    else:
+        need_review_reason = "임계값 이상 질환은 없지만 촬영 품질, 과거 영상, 임상 증상에 따라 의료진 확인이 필요합니다."
+
+    safety_note = "본 AI 결과는 최종 진단이 아니며, 의료진의 독립적인 영상 판독과 임상적 판단을 대체하지 않습니다."
+    report_draft_kr = (
+        "[AI 판독문 초안]\n"
+        f"소견: {findings_kr}\n"
+        f"결론: {impression_kr}\n"
+        f"검토 필요 사유: {need_review_reason}\n"
+        f"주의: {safety_note}"
+    )
+    report_draft_en = (
+        "[AI-assisted draft report]\n"
+        f"Findings: {findings_en}\n"
+        f"Impression: {impression_en}\n"
+        f"Review note: {need_review_reason}\n"
+        f"Safety note: {safety_note}"
+    )
+
+    return {
+        "Top_Findings": top_findings,
+        "Top_Findings_KR": top_findings_kr,
+        "Findings_KR": findings_kr,
+        "Impression_KR": impression_kr,
+        "Findings_EN": findings_en,
+        "Impression_EN": impression_en,
+        "Report_Draft_KR": report_draft_kr,
+        "Report_Draft_EN": report_draft_en,
+        "Need_Review_Reason": need_review_reason,
+        "Safety_Note": safety_note,
+    }
+
+
+def _feedback_queue_size() -> int:
+    if not FEEDBACK_QUEUE_PATH.exists():
+        return 0
+    with FEEDBACK_QUEUE_PATH.open("r", encoding="utf-8") as f:
+        return sum(1 for line in f if line.strip())
+
+
 # ── 실제 모델 추론 ────────────────────────────────────────────────────────────
 
 def _real_predict(model_key: str, image: Image.Image) -> Dict[str, float]:
@@ -366,9 +550,17 @@ async def predict(
     inference_ms = int((time.time() - start_ms) * 1000)
 
     # 결과
+    case_id     = _build_case_id(contents)
     detected    = [d for d, p in probs.items() if p >= threshold]
     top_disease = max(probs, key=probs.get)
     model_name  = get_model_info().get(model_key, {}).get("display_name", model_key)
+    report      = _build_report_draft(
+        probs=probs,
+        detected=detected,
+        top_disease=top_disease,
+        threshold=threshold,
+        is_placeholder=is_placeholder,
+    )
 
     gradcam_b64 = _FAKE_GRADCAM_B64
     if not is_placeholder:
@@ -403,6 +595,7 @@ async def predict(
 
     return PredictionResult(
         **probs,
+        Case_ID           = case_id,
         Detected_Diseases  = detected,
         Top_Disease        = top_disease,
         Top_Probability    = round(probs[top_disease], 4),
@@ -411,4 +604,62 @@ async def predict(
         Model_Used         = model_name,
         Model_Key          = model_key,
         Is_Placeholder     = is_placeholder,
+        Report_Draft       = str(report["Report_Draft_KR"]),
+        Findings_KR        = str(report["Findings_KR"]),
+        Impression_KR      = str(report["Impression_KR"]),
+        Need_Review_Reason = str(report["Need_Review_Reason"]),
+        Clinical_Report    = report,
     )
+
+
+@app.post("/feedback", response_model=FeedbackResponse, tags=["Clinical Workflow"])
+async def submit_feedback(feedback: FeedbackRequest):
+    """
+    의료진 피드백을 JSONL 검수 큐에 저장합니다.
+
+    이 큐는 즉시 모델을 재학습하지 않고, 의료진 검수·라벨 정제·규제 검토를
+    거친 뒤 학습 데이터 후보로 사용할 수 있는 데모용 운영 기록입니다.
+    """
+    FEEDBACK_QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    submitted_at = datetime.now(timezone.utc).isoformat()
+    queue_id = f"FB-{sha256(f'{feedback.case_id}-{submitted_at}-{feedback.feedback_type}'.encode('utf-8')).hexdigest()[:12].upper()}"
+    item = feedback.model_dump()
+    item.update(
+        {
+            "queue_id": queue_id,
+            "submitted_at": submitted_at,
+            "review_status": "queued_for_clinical_review",
+            "retraining_candidate": feedback.feedback_type in {"AI 판단 불일치", "히트맵 위치 부정확", "질환 라벨 수정"},
+            "regulatory_note": "피드백은 재학습 후보 큐에만 저장됩니다. 실제 모델 업데이트 전에는 별도 검수와 규제 검토가 필요합니다.",
+        }
+    )
+
+    with FEEDBACK_QUEUE_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+    return FeedbackResponse(
+        status="saved",
+        message="의료진 피드백이 검수 큐에 저장되었습니다.",
+        queue_id=queue_id,
+        queue_size=_feedback_queue_size(),
+        saved_path=str(FEEDBACK_QUEUE_PATH),
+    )
+
+
+@app.get("/feedback/queue", response_model=FeedbackQueueResponse, tags=["Clinical Workflow"])
+async def list_feedback_queue(limit: int = Query(default=20, ge=1, le=200)):
+    """최근 의료진 피드백 큐 항목을 반환합니다."""
+    if not FEEDBACK_QUEUE_PATH.exists():
+        return FeedbackQueueResponse(total_count=0, items=[])
+
+    items = []
+    with FEEDBACK_QUEUE_PATH.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                items.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return FeedbackQueueResponse(total_count=len(items), items=items[-limit:][::-1])
