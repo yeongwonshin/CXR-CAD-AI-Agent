@@ -113,7 +113,7 @@ class ViTCAD(nn.Module):
     """
     Vision Transformer ViT-B/16 기반 Multi-label 분류 모델.
 
-    timm 설치 시 timm.create_model 사용, 없으면 torchvision fallback.
+    - Backbone: torchvision ViT-B/16 (ImageNet pretrained)
     - Input : (B, 3, 224, 224)
     - Output: (B, 14) logits  ← 추론 시 torch.sigmoid() 적용
     """
@@ -121,19 +121,12 @@ class ViTCAD(nn.Module):
     def __init__(self, num_classes: int = NUM_CLASSES, pretrained: bool = False):
         super().__init__()
 
-        if _TIMM_AVAILABLE:
-            self.backbone = timm.create_model(
-                "vit_base_patch16_224",
-                pretrained=pretrained,
-                num_classes=0,  # classification head 제거
-            )
-            in_features = self.backbone.num_features  # 768
-        else:
-            weights = tv_models.ViT_B_16_Weights.IMAGENET1K_V1 if pretrained else None
-            backbone = tv_models.vit_b_16(weights=weights)
-            in_features = backbone.heads.head.in_features  # 768
-            backbone.heads.head = nn.Identity()
-            self.backbone = backbone
+        # timm/torchvision 구조 차이로 인한 가중치 로드 오류를 방지하기 위해 torchvision으로 통일합니다.
+        weights = tv_models.ViT_B_16_Weights.IMAGENET1K_V1 if pretrained else None
+        backbone = tv_models.vit_b_16(weights=weights)
+        in_features = backbone.heads.head.in_features  # 768
+        backbone.heads.head = nn.Identity()
+        self.backbone = backbone
 
         self.classifier = nn.Sequential(
             nn.LayerNorm(in_features),

@@ -70,6 +70,9 @@ st.markdown(
     [data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
         color: #e5edf8 !important;
     }
+    [data-testid="stSidebarNav"] span {
+        color: #ffffff !important;
+    }
     [data-testid="stSidebar"] hr { border-color: rgba(148,163,184,0.22) !important; }
     [data-testid="stSidebar"] input,
     [data-testid="stSidebar"] textarea {
@@ -535,7 +538,7 @@ with left:
         {"signal": "Hidden stratification", "source": "test_predictions.csv proxy features", "value": metrics.get("hidden_flagged_count", None)},
     ]
     df_source = pd.DataFrame(source_rows).astype(str)
-    st.dataframe(df_source, hide_index=True, use_container_width=True)
+    st.dataframe(df_source, hide_index=True, width="stretch")
 
 with right:
     st.subheader("Integrated readiness issues")
@@ -543,7 +546,7 @@ with right:
     if issues_df.empty:
         st.success("No reliability issues under the current thresholds.")
     else:
-        st.dataframe(issues_df, hide_index=True, use_container_width=True)
+        st.dataframe(issues_df, hide_index=True, width="stretch")
 
 st.divider()
 
@@ -563,7 +566,7 @@ if disease and not pred_df.empty:
         fig.add_trace(go.Scatter(x=cal_df["mean_prob"], y=cal_df["observed_rate"], mode="markers+lines", name="Observed"))
         fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="Perfect calibration", line=dict(dash="dash")))
         fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Mean predicted probability", yaxis_title="Observed positive rate", xaxis=dict(range=[0, 1]), yaxis=dict(range=[0, 1]))
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 st.divider()
 st.subheader("Hidden stratification proxy")
@@ -574,13 +577,13 @@ if hidden_result is not None:
     if not strata_df.empty:
         c1, c2 = st.columns([1, 1])
         with c1:
-            st.dataframe(strata_df, hide_index=True, use_container_width=True)
+            st.dataframe(strata_df, hide_index=True, width="stretch")
         with c2:
             fig = go.Figure()
             fig.add_trace(go.Bar(x=strata_df["stratum_id"].astype(str), y=strata_df["error_rate"], name="Error rate"))
             fig.add_trace(go.Scatter(x=strata_df["stratum_id"].astype(str), y=strata_df["auroc"], mode="lines+markers", name="AUROC", yaxis="y2"))
             fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Proxy stratum", yaxis=dict(title="Error rate", range=[0, 1]), yaxis2=dict(title="AUROC", overlaying="y", side="right", range=[0, 1]), legend=dict(orientation="h", y=1.1))
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     else:
         st.info("Minimum size 조건을 만족하는 strata가 없습니다.")
 else:

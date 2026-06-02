@@ -71,6 +71,14 @@ st.markdown(
     [data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
         color: #e5edf8 !important;
     }
+    [data-testid="stSidebar"] div[role="radiogroup"] label p,
+    [data-testid="stSidebar"] div[role="radiogroup"] label span,
+    [data-testid="stSidebar"] div[role="radiogroup"] div {
+        color: #ffffff !important;
+    }
+    [data-testid="stSidebarNav"] span {
+        color: #ffffff !important;
+    }
     [data-testid="stSidebar"] hr { border-color: rgba(148,163,184,0.22) !important; }
     [data-testid="stSidebar"] input,
     [data-testid="stSidebar"] textarea {
@@ -616,9 +624,9 @@ def render_operating_point() -> str:
 
     c1, c2 = st.columns([3, 2])
     with c1:
-        st.plotly_chart(chart_operating_point(EXAMPLE_OP), use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(chart_operating_point(EXAMPLE_OP), width="stretch", config={"displayModeBar": False})
     with c2:
-        st.dataframe(EXAMPLE_OP, hide_index=True, use_container_width=True)
+        st.dataframe(EXAMPLE_OP, hide_index=True, width="stretch")
         tab_screen, tab_confirm = st.tabs(["스크리닝", "확진 보조"])
         with tab_screen:
             st.markdown(
@@ -648,9 +656,9 @@ def render_gender() -> str:
     st.markdown('<div class="section-header">2. Subgroup Analysis — Gender</div>', unsafe_allow_html=True)
     c1, c2 = st.columns([3, 2])
     with c1:
-        st.plotly_chart(chart_subgroup_gender(EXAMPLE_GENDER), use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(chart_subgroup_gender(EXAMPLE_GENDER), width="stretch", config={"displayModeBar": False})
     with c2:
-        st.dataframe(EXAMPLE_GENDER, hide_index=True, use_container_width=True)
+        st.dataframe(EXAMPLE_GENDER, hide_index=True, width="stretch")
         st.markdown(
             """
             <div class="insight-box">
@@ -668,9 +676,9 @@ def render_age() -> str:
     st.markdown('<div class="section-header">3. Subgroup Analysis — Age Group</div>', unsafe_allow_html=True)
     c1, c2 = st.columns([3, 2])
     with c1:
-        st.plotly_chart(chart_subgroup_age(EXAMPLE_AGE), use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(chart_subgroup_age(EXAMPLE_AGE), width="stretch", config={"displayModeBar": False})
     with c2:
-        st.dataframe(EXAMPLE_AGE, hide_index=True, use_container_width=True)
+        st.dataframe(EXAMPLE_AGE, hide_index=True, width="stretch")
         st.markdown(
             """
             <div class="insight-box">
@@ -688,9 +696,9 @@ def render_view() -> str:
     st.markdown('<div class="section-header">4. Subgroup Analysis — View Position</div>', unsafe_allow_html=True)
     c1, c2 = st.columns([3, 2])
     with c1:
-        st.plotly_chart(chart_subgroup_view(EXAMPLE_VIEW), use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(chart_subgroup_view(EXAMPLE_VIEW), width="stretch", config={"displayModeBar": False})
     with c2:
-        st.dataframe(EXAMPLE_VIEW, hide_index=True, use_container_width=True)
+        st.dataframe(EXAMPLE_VIEW, hide_index=True, width="stretch")
         st.markdown(
             """
             <div class="warning-box">
@@ -709,9 +717,9 @@ def render_external_validation() -> str:
     st.markdown('<div class="section-header">5. External Validation (CheXpert)</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
-        st.plotly_chart(chart_external_val(EXAMPLE_EXT), use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(chart_external_val(EXAMPLE_EXT), width="stretch", config={"displayModeBar": False})
     with c2:
-        st.dataframe(EXAMPLE_EXT, hide_index=True, use_container_width=True)
+        st.dataframe(EXAMPLE_EXT, hide_index=True, width="stretch")
 
     info_cols = st.columns(3)
     with info_cols[0]:
@@ -747,8 +755,8 @@ def render_external_validation() -> str:
 
 def render_domain_gap() -> str:
     st.markdown('<div class="section-header">6. Domain Shift Gap</div>', unsafe_allow_html=True)
-    st.plotly_chart(chart_domain_gap(EXAMPLE_EXT), use_container_width=True, config={"displayModeBar": False})
-    st.dataframe(EXAMPLE_EXT[["Disease", "Gap"]], hide_index=True, use_container_width=True)
+    st.plotly_chart(chart_domain_gap(EXAMPLE_EXT), width="stretch", config={"displayModeBar": False})
+    st.dataframe(EXAMPLE_EXT[["Disease", "Gap"]], hide_index=True, width="stretch")
     st.markdown(
         """
         <div class="warning-box">
@@ -766,9 +774,9 @@ def render_error_cases() -> str:
     st.markdown('<div class="section-header">7. Error Analysis — False Positive / False Negative</div>', unsafe_allow_html=True)
     tab_fp, tab_fn = st.tabs(["False Positive Top 5", "False Negative Top 5"])
     with tab_fp:
-        st.dataframe(FALSE_POSITIVE_DF, hide_index=True, use_container_width=True)
+        st.dataframe(FALSE_POSITIVE_DF, hide_index=True, width="stretch")
     with tab_fn:
-        st.dataframe(FALSE_NEGATIVE_DF, hide_index=True, use_container_width=True)
+        st.dataframe(FALSE_NEGATIVE_DF, hide_index=True, width="stretch")
     return (
         "Metric focus: top false positive and false negative cases.\n"
         + to_context_block("False Positives", FALSE_POSITIVE_DF)
@@ -780,7 +788,7 @@ def render_error_cases() -> str:
 
 def render_region_shift() -> str:
     st.markdown('<div class="section-header">8. Error Analysis — 폐 영역 이탈 분석</div>', unsafe_allow_html=True)
-    st.plotly_chart(chart_region_shift(REGION_DF), use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(chart_region_shift(REGION_DF), width="stretch", config={"displayModeBar": False})
     st.markdown(
         """
         <div class="warning-box">
@@ -790,7 +798,7 @@ def render_region_shift() -> str:
         """,
         unsafe_allow_html=True,
     )
-    st.dataframe(REGION_DF, hide_index=True, use_container_width=True)
+    st.dataframe(REGION_DF, hide_index=True, width="stretch")
     return "Metric focus: region shift and shortcut learning evidence.\n" + to_context_block("Region Distribution", REGION_DF)
 
 

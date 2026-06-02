@@ -84,6 +84,9 @@ st.markdown("""
     [data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
         color: #e5edf8 !important;
     }
+    [data-testid="stSidebarNav"] span {
+        color: #ffffff !important;
+    }
     [data-testid="stSidebar"] hr { border-color: rgba(148,163,184,0.22) !important; }
     [data-testid="stSidebar"] .stRadio label,
     [data-testid="stSidebar"] .stSlider label { color: #d7e3f4 !important; }
@@ -622,7 +625,7 @@ else:
     with col_left:
         st.markdown('<div class="section-title">업로드된 이미지</div>', unsafe_allow_html=True)
         st.markdown('<div class="premium-card" style="padding:1.2rem; text-align:center;">', unsafe_allow_html=True)
-        st.image(image, use_column_width=True, caption=uploaded_file.name)
+        st.image(image, width="stretch", caption=uploaded_file.name)
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="section-title">Grad-CAM 시각화</div>', unsafe_allow_html=True)
@@ -635,7 +638,7 @@ else:
             import base64
             cam_bytes = base64.b64decode(result["GradCAM_Base64"])
             st.markdown('<div class="premium-card" style="padding:1.2rem; text-align:center;">', unsafe_allow_html=True)
-            st.image(cam_bytes, use_column_width=True)
+            st.image(cam_bytes, width="stretch")
             st.markdown("""
             <div class="glass-card blue" style="margin-top:1rem;margin-bottom:0;">
                 <b>활성화 맵 해석 방법</b><br>
@@ -724,4 +727,4 @@ else:
             st.markdown('<div class="section-title">전체 질환 확률</div>', unsafe_allow_html=True)
             probs = {label: result[label] for label in DISEASE_LABELS}
             fig = create_disease_chart(probs, threshold)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
