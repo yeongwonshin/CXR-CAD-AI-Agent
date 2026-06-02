@@ -9,7 +9,9 @@ DenseNet-121 / EfficientNet-B4 / ViT-B/16 모델 선택 UI 포함.
 from __future__ import annotations
 
 import io
+import hashlib
 import os
+from html import escape
 
 import requests
 import streamlit as st
@@ -24,6 +26,31 @@ DISEASE_LABELS = [
     "Mass", "Nodule", "Pneumonia", "Pneumothorax",
     "Consolidation", "Edema", "Emphysema", "Fibrosis",
     "Pleural_Thickening", "Hernia",
+]
+
+DISEASE_LABELS_KR = {
+    "Atelectasis": "무기폐",
+    "Cardiomegaly": "심비대",
+    "Effusion": "흉수",
+    "Infiltration": "폐 침윤",
+    "Mass": "종괴",
+    "Nodule": "결절",
+    "Pneumonia": "폐렴",
+    "Pneumothorax": "기흉",
+    "Consolidation": "경화",
+    "Edema": "폐부종",
+    "Emphysema": "폐기종",
+    "Fibrosis": "섬유화",
+    "Pleural_Thickening": "흉막 비후",
+    "Hernia": "탈장",
+}
+
+FEEDBACK_TYPES = [
+    "AI 판단 동의",
+    "AI 판단 불일치",
+    "히트맵 위치 부정확",
+    "질환 라벨 수정",
+    "판독의 코멘트",
 ]
 
 MODEL_OPTIONS = {
@@ -320,6 +347,42 @@ st.markdown("""
     .feature-card h4 { color:#0f172a !important; margin:0 0 0.45rem; font-size:1rem; }
     .feature-card p { color:#64748b !important; font-size:0.84rem; margin:0; line-height:1.5; }
 
+    .clinical-report-card {
+        border-radius: 22px;
+        padding: 1.15rem;
+        margin: 1rem 0;
+        background:
+            radial-gradient(circle at 12% 0%, rgba(20,184,166,0.16), transparent 26%),
+            linear-gradient(135deg, rgba(255,255,255,0.98), rgba(240,253,250,0.92));
+        border: 1px solid rgba(20,184,166,0.28);
+        box-shadow: 0 16px 34px rgba(15,23,42,0.08);
+    }
+    .clinical-report-card h4 { margin:0; color:#0f172a !important; font-weight:850; font-size:1rem; }
+    .clinical-report-card p { margin:0.4rem 0 0; color:#475569 !important; font-size:0.84rem; line-height:1.55; }
+    .review-note {
+        border-radius: 16px;
+        padding: 0.9rem 1rem;
+        background: linear-gradient(135deg, #fff7ed, #fefce8);
+        border: 1px solid rgba(245,158,11,0.30);
+        color: #78350f !important;
+        font-size: 0.84rem;
+        line-height: 1.5;
+        font-weight: 700;
+    }
+    .feedback-card {
+        border-radius: 22px;
+        padding: 1.15rem;
+        margin: 1rem 0;
+        background:
+            radial-gradient(circle at 8% 18%, rgba(37,99,235,0.14), transparent 24%),
+            linear-gradient(135deg, rgba(255,255,255,0.98), rgba(239,246,255,0.94));
+        border: 1px solid rgba(59,130,246,0.28);
+        box-shadow: 0 16px 34px rgba(15,23,42,0.08);
+    }
+    .feedback-card h4 { margin:0; color:#0f172a !important; font-weight:850; font-size:1rem; }
+    .feedback-card p { margin:0.4rem 0 0; color:#475569 !important; font-size:0.84rem; line-height:1.55; }
+    .queue-badge { display:inline-block; border-radius:999px; padding:0.28rem 0.62rem; background:#dbeafe; color:#1e3a8a !important; font-size:0.74rem; font-weight:850; margin-top:0.65rem; }
+
     #MainMenu {visibility:hidden;} footer {visibility:hidden;}
     @media (max-width: 900px) { .upload-steps { grid-template-columns: 1fr; } }
 </style>
@@ -365,6 +428,76 @@ def call_predict_api(image_bytes: bytes, filename: str, model_key: str, threshol
     except requests.exceptions.ConnectionError:
         st.error("백엔드 API에 연결할 수 없습니다.")
         return None
+
+
+def call_feedback_api(payload: dict) -> dict | None:
+    try:
+        resp = requests.post(f"{API_URL}/feedback", json=payload, timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+        st.error(f"피드백 저장 오류 {resp.status_code}: {resp.text}")
+        return None
+    except requests.exceptions.ConnectionError:
+        st.error("백엔드 API에 연결할 수 없어 피드백을 저장하지 못했습니다.")
+        return None
+
+
+def get_feedback_queue_summary(limit: int = 5) -> dict | None:
+    try:
+        resp = requests.get(f"{API_URL}/feedback/queue", params={"limit": limit}, timeout=5)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def disease_display(label: str) -> str:
+    return f"{DISEASE_LABELS_KR.get(label, label.replace('_', ' '))} / {label.replace('_', ' ')}"
+
+
+def build_prediction_summary(result: dict, probs: dict, filename: str, edited_report: str) -> dict:
+    return {
+        "filename": filename,
+        "top_disease": result.get("Top_Disease"),
+        "top_probability": result.get("Top_Probability"),
+        "detected_diseases": result.get("Detected_Diseases", []),
+        "probabilities": probs,
+        "model_used": result.get("Model_Used"),
+        "model_key": result.get("Model_Key"),
+        "is_placeholder": result.get("Is_Placeholder"),
+        "report_draft_kr": edited_report,
+        "need_review_reason": result.get("Need_Review_Reason", ""),
+    }
+
+
+def submit_clinician_feedback(
+    *,
+    feedback_type: str,
+    result: dict,
+    probs: dict,
+    filename: str,
+    threshold: float,
+    corrected_labels: list[str],
+    comment: str,
+    reviewer_id: str,
+    edited_report: str,
+) -> None:
+    payload = {
+        "case_id": result.get("Case_ID", "CXR-UNKNOWN"),
+        "feedback_type": feedback_type,
+        "original_top_disease": result.get("Top_Disease"),
+        "corrected_labels": corrected_labels,
+        "comment": comment.strip(),
+        "reviewer_id": reviewer_id.strip() or None,
+        "model_key": result.get("Model_Key"),
+        "threshold": threshold,
+        "prediction_summary": build_prediction_summary(result, probs, filename, edited_report),
+    }
+    saved = call_feedback_api(payload)
+    if saved:
+        st.session_state["last_feedback_response"] = saved
+        st.success(f"{saved.get('message', '피드백이 저장되었습니다')} 큐 ID: {saved.get('queue_id', '-')}")
 
 
 def get_risk_color(prob: float, threshold: float) -> str:
@@ -612,12 +745,19 @@ else:
     # ── 이미지 업로드 완료 → 분석 ─────────────────────────────────────────────
     image_bytes = uploaded_file.getvalue()
     image = Image.open(io.BytesIO(image_bytes))
+    image_hash = hashlib.sha256(image_bytes).hexdigest()[:16]
+    result_cache_key = f"{uploaded_file.name}:{image_hash}:{selected_model_key}:{threshold:.2f}"
 
     result = None
     if health:
-        model_label = MODEL_OPTIONS[selected_model_key]["label"]
-        with st.spinner(f"{model_label} 모델로 분석 중..."):
-            result = call_predict_api(image_bytes, uploaded_file.name, selected_model_key, threshold)
+        if st.session_state.get("result_cache_key") == result_cache_key:
+            result = st.session_state.get("last_prediction_result")
+        else:
+            model_label = MODEL_OPTIONS[selected_model_key]["label"]
+            with st.spinner(f"{model_label} 모델로 분석 중..."):
+                result = call_predict_api(image_bytes, uploaded_file.name, selected_model_key, threshold)
+            st.session_state["result_cache_key"] = result_cache_key
+            st.session_state["last_prediction_result"] = result
 
     col_left, col_right = st.columns([2, 3], gap="large")
 
@@ -711,6 +851,115 @@ else:
 
             st.markdown("<br>", unsafe_allow_html=True)
 
+            probs = {label: result[label] for label in DISEASE_LABELS}
+            case_id = result.get("Case_ID", f"CXR-{image_hash.upper()}")
+            clinical_report = result.get("Clinical_Report", {}) or {}
+            top_findings = clinical_report.get("Top_Findings_KR") or clinical_report.get("Top_Findings") or []
+            top_findings_html = " ".join(
+                f"<span class='disease-tag'>{escape(str(item))}</span>" for item in top_findings[:3]
+            )
+
+            # ── AI 판독문 초안 ───────────────────────────────────────────
+            st.markdown('<div class="section-title">AI 판독문 초안</div>', unsafe_allow_html=True)
+            st.markdown(
+                f"""
+                <div class="clinical-report-card">
+                    <h4>복사·수정 가능한 판독 보조 초안</h4>
+                    <p>
+                        Case ID <b>{escape(case_id)}</b> · AI가 제시한 Findings/Impression 초안입니다.
+                        최종 판독 전 원본 영상, Grad-CAM, 과거 영상, 임상 정보를 반드시 함께 확인하십시오.
+                    </p>
+                    <div style="margin-top:0.75rem;">{top_findings_html}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            edited_report = st.text_area(
+                "판독문 초안 편집",
+                value=result.get("Report_Draft") or clinical_report.get("Report_Draft_KR", ""),
+                height=220,
+                key=f"report_draft_{case_id}",
+                help="의료진이 실제 판독문에 맞게 수정한 뒤 복사하거나 피드백 큐에 함께 저장할 수 있습니다.",
+            )
+            st.download_button(
+                "판독문 초안 TXT 다운로드",
+                data=edited_report.encode("utf-8"),
+                file_name=f"{case_id}_ai_report_draft.txt",
+                mime="text/plain",
+                key=f"download_report_{case_id}",
+            )
+            if result.get("Need_Review_Reason"):
+                st.markdown(
+                    f"<div class='review-note'>검토 필요 사유: {escape(result.get('Need_Review_Reason', ''))}</div>",
+                    unsafe_allow_html=True,
+                )
+
+            # ── 의료진 피드백 + 재학습 검수 큐 ───────────────────────────
+            st.markdown('<div class="section-title">의료진 피드백 · 재학습 검수 큐</div>', unsafe_allow_html=True)
+            queue_summary = get_feedback_queue_summary(limit=3) if health else None
+            queue_count = queue_summary.get("total_count", 0) if queue_summary else 0
+            st.markdown(
+                f"""
+                <div class="feedback-card">
+                    <h4>판독의 검수 기록 저장</h4>
+                    <p>
+                        아래 버튼으로 AI 판단 동의/불일치, Grad-CAM 위치 오류, 라벨 수정, 코멘트를 저장합니다.
+                        저장된 항목은 즉시 재학습하지 않고 <b>검수 큐</b>에 쌓아 병원별 라벨 정제와 모델 개선 후보로 활용합니다.
+                    </p>
+                    <span class="queue-badge">현재 검수 큐 {queue_count}건</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            reviewer_id = st.text_input(
+                "판독의/검수자 ID 또는 이니셜",
+                value="",
+                placeholder="예: RAD01, Dr.Kim",
+                key=f"reviewer_id_{case_id}",
+            )
+            corrected_labels = st.multiselect(
+                "질환 라벨 수정이 필요한 경우 올바른 라벨을 선택하세요",
+                options=DISEASE_LABELS,
+                default=[],
+                format_func=disease_display,
+                key=f"corrected_labels_{case_id}",
+            )
+            clinician_comment = st.text_area(
+                "판독의가 남긴 코멘트",
+                placeholder="예: AI는 심비대를 높게 예측했지만 AP portable 촬영 영향으로 보이며 실제 판독은 정상 범위에 가깝습니다.",
+                height=110,
+                key=f"clinician_comment_{case_id}",
+            )
+
+            fb_cols = st.columns(5)
+            for fb_col, feedback_type in zip(fb_cols, FEEDBACK_TYPES):
+                with fb_col:
+                    if st.button(feedback_type, key=f"fb_{feedback_type}_{case_id}", use_container_width=True):
+                        if feedback_type == "질환 라벨 수정" and not corrected_labels:
+                            st.warning("라벨 수정 피드백을 저장하려면 수정할 질환 라벨을 1개 이상 선택하세요.")
+                        elif feedback_type == "판독의 코멘트" and not clinician_comment.strip():
+                            st.warning("코멘트 저장을 위해 판독의 코멘트를 입력하세요.")
+                        else:
+                            submit_clinician_feedback(
+                                feedback_type=feedback_type,
+                                result=result,
+                                probs=probs,
+                                filename=uploaded_file.name,
+                                threshold=threshold,
+                                corrected_labels=corrected_labels,
+                                comment=clinician_comment,
+                                reviewer_id=reviewer_id,
+                                edited_report=edited_report,
+                            )
+
+            if queue_summary and queue_summary.get("items"):
+                with st.expander("최근 검수 큐 기록 보기"):
+                    for item in queue_summary.get("items", []):
+                        st.markdown(
+                            f"- **{item.get('feedback_type', '-')}** · {item.get('case_id', '-')} · "
+                            f"{item.get('submitted_at', '-')[:19]} · 상태: {item.get('review_status', '-')}"
+                        )
+
             # ── 감지된 질환 태그 ──────────────────────────────────────────
             st.markdown('<div class="section-title">감지된 질환</div>', unsafe_allow_html=True)
             detected = [d for d in DISEASE_LABELS if result.get(d, 0) >= threshold]
@@ -725,6 +974,5 @@ else:
 
             # ── 질환 확률 차트 ────────────────────────────────────────────
             st.markdown('<div class="section-title">전체 질환 확률</div>', unsafe_allow_html=True)
-            probs = {label: result[label] for label in DISEASE_LABELS}
             fig = create_disease_chart(probs, threshold)
             st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
