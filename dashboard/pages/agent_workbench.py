@@ -1,4 +1,4 @@
-""" Agentic Case Workbench — MedRAX-style multi-image CXR workflow.
+"""🧠 Agentic Case Workbench — MedRAX-style multi-image CXR workflow.
 
 기존 CXR-CAD 모델 학습 결과를 그대로 사용하면서, 플랫폼 레벨에서
 MedRAX의 강점인 multi-image 입력, 대화형 agent, DICOM 처리, 케이스 비교,
@@ -17,6 +17,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
@@ -161,6 +162,116 @@ def call_agent_api(files, model_key: str, threshold: float, question: str) -> di
         st.error("백엔드 API에 연결할 수 없습니다. `uvicorn api.main:app --reload --port 8000`을 먼저 실행하세요.")
     except Exception as exc:
         st.error(f"Agent 분석 요청 중 오류가 발생했습니다: {exc}")
+    return None
+
+
+def _short_text(value: Any, limit: int = 700) -> str:
+    text = str(value or "").strip()
+    return text if len(text) <= limit else text[:limit].rstrip() + "..."
+
+
+def compact_chat_result_payload(result: dict) -> dict:
+    """Strip image/base64-heavy fields before /agent/chat.
+
+    The Workbench keeps the full result for image tabs and Grad-CAM rendering,
+    but chat only needs compact tool outputs.  This removes GradCAM_Base64 and
+    verbose report dictionaries, which makes follow-up questions feel much more
+    like MedRAX's lightweight thread interaction.
+    """
+    result = result or {}
+    compact_cases = []
+    for idx, case in enumerate(result.get("cases", []) or []):
+        prediction = case.get("prediction", {}) or {}
+        profile = case.get("agent_profile", {}) or {}
+        quality = profile.get("quality_check", {}) or prediction.get("Quality_Check", {}) or {}
+        triage = profile.get("triage_assessment", {}) or prediction.get("Triage_Assessment", {}) or {}
+        anatomy = profile.get("anatomy_assessment", {}) or prediction.get("Anatomy_Assessment", {}) or {}
+        rois = []
+        for roi in (anatomy.get("focus_rois") or [])[:4]:
+            rois.append({
+                "label_kr": roi.get("label_kr") or roi.get("label"),
+                "priority_score": roi.get("priority_score"),
+                "related_findings": (roi.get("related_findings") or [])[:4],
+                "review_hint": _short_text(roi.get("review_hint"), 160),
+            })
+        probs = case.get("probabilities", {}) or {}
+        top_probabilities = [
+            {"label": label, "label_kr": DISEASE_LABELS_KR.get(label, label), "probability": float(prob)}
+            for label, prob in sorted(probs.items(), key=lambda item: float(item[1] or 0.0), reverse=True)[:5]
+        ]
+        compact_cases.append({
+            "index": idx + 1,
+            "filename": case.get("filename"),
+            "case_id": case.get("case_id"),
+            "top_disease": case.get("top_disease"),
+            "top_disease_kr": DISEASE_LABELS_KR.get(str(case.get("top_disease")), str(case.get("top_disease"))),
+            "top_probability": case.get("top_probability"),
+            "detected_diseases": (case.get("detected_diseases") or [])[:8],
+            "top_probabilities": top_probabilities,
+            "is_placeholder": case.get("is_placeholder"),
+            "quality_check": {
+                "quality_grade": quality.get("quality_grade"),
+                "quality_score": quality.get("quality_score"),
+                "flags": (quality.get("flags") or [])[:3],
+            },
+            "triage_assessment": {
+                "triage_level": triage.get("triage_level"),
+                "triage_label_kr": triage.get("triage_label_kr"),
+                "reason": _short_text(triage.get("reason"), 240),
+            },
+            "anatomy_assessment": {
+                "recommended_review_order": (anatomy.get("recommended_review_order") or [])[:5],
+                "focus_rois": rois,
+                "disclaimer": _short_text(anatomy.get("disclaimer"), 220),
+            },
+            "report_draft": _short_text(case.get("report_draft") or prediction.get("Report_Draft"), 700),
+            "findings_kr": _short_text(prediction.get("Findings_KR"), 320),
+            "impression_kr": _short_text(prediction.get("Impression_KR"), 320),
+            "has_gradcam": bool(prediction.get("GradCAM_Base64") and len(str(prediction.get("GradCAM_Base64"))) > 500),
+        })
+
+    summary = result.get("agent_summary", {}) or {}
+    comparison = summary.get("comparison", {}) or {}
+    return {
+        "status": result.get("status"),
+        "model_key": result.get("model_key"),
+        "threshold": result.get("threshold"),
+        "case_count": result.get("case_count") or len(compact_cases),
+        "cases": compact_cases,
+        "agent_summary": {
+            "narrative": _short_text(summary.get("narrative"), 700),
+            "placeholder_count": summary.get("placeholder_count"),
+            "comparison": {
+                "enabled": comparison.get("enabled", False),
+                "summary": _short_text(comparison.get("summary"), 500),
+                "probability_deltas": (comparison.get("probability_deltas") or [])[:6],
+            },
+            "safety_note": _short_text(summary.get("safety_note"), 280),
+        },
+        "safety_note": result.get("safety_note"),
+    }
+
+
+def call_agent_chat_api(question: str, result: dict, history: List[Dict[str, str]]) -> dict | None:
+    """Send a follow-up question to the backend LLM agent.
+
+    The UI keeps the same chat bubbles/input, while the answer engine moves to
+    the MedRAX-like backend path: LLM brain over existing CXR-CAD tool outputs.
+    """
+    payload = {
+        "question": question.strip(),
+        "result": compact_chat_result_payload(result),
+        "history": history[-6:],
+    }
+    try:
+        resp = requests.post(f"{API_URL}/agent/chat", json=payload, timeout=35)
+        if resp.status_code == 200:
+            return resp.json()
+        st.error(f"Agent Chat API 오류 {resp.status_code}: {resp.text}")
+    except requests.exceptions.ConnectionError:
+        st.error("백엔드 API에 연결할 수 없습니다. `uvicorn api.main:app --reload --port 8000`을 먼저 실행하세요.")
+    except Exception as exc:
+        st.error(f"Agent 후속 질의 중 오류가 발생했습니다: {exc}")
     return None
 
 
@@ -464,13 +575,52 @@ def _rerun() -> None:
         st.experimental_rerun()
 
 
+def _install_enter_submit_hotkey() -> None:
+    """Submit the existing follow-up textarea with Enter, without changing UI."""
+    components.html(
+        """
+<script>
+(function() {
+  function bindCxrAgentEnterSubmit() {
+    try {
+      const doc = window.parent.document;
+      const textareas = Array.from(doc.querySelectorAll('textarea'));
+      const target = textareas.find((el) => {
+        const label = el.getAttribute('aria-label') || '';
+        const placeholder = el.getAttribute('placeholder') || '';
+        return label.includes('Agent에게 후속 질문') || placeholder.includes('폐렴 의심 영상');
+      });
+      if (!target || target.dataset.cxrAgentEnterSubmit === '1') return;
+      target.dataset.cxrAgentEnterSubmit = '1';
+      target.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          const buttons = Array.from(doc.querySelectorAll('button'));
+          const sendButton = buttons.find((btn) => (btn.innerText || '').includes('질문 보내기'));
+          if (sendButton) sendButton.click();
+        }
+      }, true);
+    } catch (err) {
+      // Streamlit component sandbox may block parent access on some deployments.
+      // The visible submit button remains available as the fallback path.
+    }
+  }
+  bindCxrAgentEnterSubmit();
+  window.setInterval(bindCxrAgentEnterSubmit, 800);
+})();
+</script>
+        """,
+        height=0,
+    )
+
+
 def render_agent_chat(result: dict) -> None:
     st.markdown('<div class="section-title">Agent 대화 창</div>', unsafe_allow_html=True)
     st.markdown(
         """
 <div class="agent-card">
-    <h3>MedRAX-style interactive chat</h3>
-    <p>업로드한 여러 영상의 분석 결과를 기반으로 Agent에게 계속 질문할 수 있습니다. 대화는 현재 세션에서 유지되며, 아래 이미지별 판독·피드백 기능은 그대로 유지됩니다.</p>
+    <h3>MedRAX-style LLM chat</h3>
+    <p>업로드한 여러 영상의 분석 결과를 기존 CXR-CAD 도구 출력으로 묶고, 백엔드 LLM Agent가 그 컨텍스트 위에서 계속 답변합니다. 대화 UI와 이미지별 판독·피드백 기능은 그대로 유지됩니다.</p>
 </div>
 """,
         unsafe_allow_html=True,
@@ -493,14 +643,27 @@ def render_agent_chat(result: dict) -> None:
         with col_clear:
             clear = st.form_submit_button("대화 초기화", use_container_width=True)
 
+    _install_enter_submit_hotkey()
+
     if clear:
         st.session_state["agent_chat_messages"] = build_initial_chat(result, "")
         st.session_state["agent_chat_nonce"] += 1
         _rerun()
     if send:
         if followup.strip():
-            st.session_state["agent_chat_messages"].append({"role": "user", "content": followup.strip()})
-            st.session_state["agent_chat_messages"].append({"role": "agent", "content": build_agent_reply(followup, result)})
+            user_message = {"role": "user", "content": followup.strip()}
+            prior_history = list(st.session_state.get("agent_chat_messages", []))
+            st.session_state["agent_chat_messages"].append(user_message)
+            with st.spinner("LLM Agent가 CXR-CAD tool context를 바탕으로 답변 중입니다..."):
+                chat_context = st.session_state.get("agent_chat_context") or compact_chat_result_payload(result)
+                chat_response = call_agent_chat_api(followup, chat_context, prior_history + [user_message])
+            if chat_response and chat_response.get("answer"):
+                answer = str(chat_response.get("answer"))
+                if chat_response.get("fallback") and chat_response.get("error"):
+                    answer += f"\n\n[LLM fallback 사유] {chat_response.get('error')}"
+            else:
+                answer = build_agent_reply(followup, result)
+            st.session_state["agent_chat_messages"].append({"role": "agent", "content": answer})
             st.session_state["agent_chat_nonce"] += 1
             _rerun()
         else:
@@ -559,11 +722,7 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True,
     help="동일 환자의 과거/현재 영상 또는 여러 케이스를 한 번에 넣어 이미지별 초안과 비교 요약을 생성합니다.",
 )
-question = st.text_area(
-    "Agent에게 처음 물어볼 질문 또는 비교 요청",
-    placeholder="예: 첫 번째 영상과 마지막 영상에서 악화된 소견이 있는지 비교해줘. / 기흉 의심 케이스를 우선순위로 정리해줘.",
-    height=125,
-)
+question = ""
 
 run = st.button("Agent 분석 실행", type="primary", use_container_width=True, disabled=not uploaded_files or not health)
 if run:
@@ -572,6 +731,7 @@ if run:
         st.session_state["agent_result"] = result_payload
         st.session_state["agent_uploaded_lookup"] = {f.name: f.getvalue() for f in uploaded_files}
         if result_payload:
+            st.session_state["agent_chat_context"] = compact_chat_result_payload(result_payload)
             st.session_state["agent_chat_messages"] = build_initial_chat(result_payload, question)
             st.session_state["agent_chat_nonce"] = st.session_state.get("agent_chat_nonce", 0) + 1
 
