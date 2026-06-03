@@ -132,6 +132,35 @@ class AgentBatchResponse(BaseModel):
     safety_note: str = Field(default="본 결과는 최종 진단이 아니며 의료진 검토가 필요합니다.", description="안전 고지")
 
 
+class AgentChatMessage(BaseModel):
+    """Agent 대화 이력 메시지."""
+
+    role: Literal["user", "agent", "assistant"] = Field(..., description="메시지 역할")
+    content: str = Field(..., description="메시지 내용")
+
+
+class AgentChatRequest(BaseModel):
+    """POST /agent/chat 요청 스키마 — LLM 기반 후속 질의."""
+
+    question: str = Field(..., description="사용자가 Agent에게 입력한 후속 질문")
+    result: Dict[str, Any] = Field(..., description="/agent/analyze로 생성된 케이스 묶음 결과")
+    history: List[AgentChatMessage] = Field(default_factory=list, description="현재 세션의 대화 이력")
+
+
+class AgentChatResponse(BaseModel):
+    """POST /agent/chat 응답 스키마."""
+
+    answer: str = Field(..., description="LLM 또는 fallback agent의 답변")
+    engine: str = Field(..., description="llm_openai_compatible 또는 local_grounded_fallback")
+    model: Optional[str] = Field(default=None, description="사용된 LLM 모델명")
+    fallback: bool = Field(default=False, description="LLM 호출 실패/미설정으로 fallback을 사용했는지 여부")
+    used_context_tools: List[str] = Field(default_factory=list, description="답변 생성에 투입된 MedRAX식 tool context 목록")
+    generated_at: Optional[str] = Field(default=None, description="응답 생성 시각")
+    usage: Dict[str, Any] = Field(default_factory=dict, description="LLM 토큰 사용량 등 provider 응답 메타데이터")
+    safety_note: str = Field(default="본 결과는 최종 진단이 아니며 의료진 검토가 필요합니다.", description="안전 고지")
+    error: Optional[str] = Field(default=None, description="fallback 전환 사유 또는 LLM 오류 메시지")
+
+
 FeedbackType = Literal[
     "AI 판단 동의",
     "AI 판단 불일치",

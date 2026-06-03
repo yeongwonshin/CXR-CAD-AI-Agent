@@ -41,6 +41,8 @@ from PIL import Image
 from api.schemas import (
     AgentBatchResponse,
     AgentCaseResult,
+    AgentChatRequest,
+    AgentChatResponse,
     FeedbackQueueResponse,
     FeedbackRequest,
     FeedbackResponse,
@@ -50,7 +52,7 @@ from api.schemas import (
 )
 from src.preprocess.dicom_utils import dicom_to_pil, is_dicom, parse_dicom_metadata
 from src.preprocess.transforms import preprocess_single_image
-from src.agentic import build_agent_batch_summary, build_agent_case_profile, build_tool_trace
+from src.agentic import build_agent_batch_summary, build_agent_case_profile, build_tool_trace, generate_llm_agent_reply
 from src.train.models import (
     DISEASE_LABELS,
     SUPPORTED_MODELS,
@@ -746,6 +748,25 @@ async def analyze_with_agent(
         tool_trace=tool_trace,
         safety_note="본 Agent 결과는 최종 진단이 아니며 의료진 검토가 필요합니다.",
     )
+
+
+@app.post("/agent/chat", response_model=AgentChatResponse, tags=["Agentic Workflow"])
+async def chat_with_agent(request: AgentChatRequest):
+    """LLM-backed MedRAX-style follow-up chat over existing CXR-CAD outputs.
+
+    이 엔드포인트는 모델을 다시 학습하거나 새 추론을 실행하지 않습니다.
+    /agent/analyze가 만든 multi-image 결과를 MedRAX식 tool context로 압축한 뒤,
+    OpenAI-compatible LLM을 agent brain으로 사용해 후속 질문에 답합니다.
+    LLM 설정이 없으면 동일 컨텍스트 기반 deterministic fallback을 반환합니다.
+    """
+    if not request.question.strip():
+        raise HTTPException(status_code=400, detail="질문을 입력하세요.")
+    reply = generate_llm_agent_reply(
+        question=request.question,
+        agent_result=request.result,
+        history=[message.model_dump() for message in request.history],
+    )
+    return AgentChatResponse(**reply)
 
 
 @app.post("/feedback", response_model=FeedbackResponse, tags=["Clinical Workflow"])
