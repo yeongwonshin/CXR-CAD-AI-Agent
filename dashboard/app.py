@@ -591,6 +591,49 @@ def render_status_card(health: dict | None) -> None:
     )
 
 
+ACTIVE_UPLOAD_KEY = "active_xray_upload"
+
+
+def persist_uploaded_image(uploaded_file) -> dict | None:
+    """Keep the uploaded image available after Streamlit page navigation.
+
+    Streamlit's file_uploader value can be cleared when a multipage app switches
+    away from the page that owns the widget.  Storing the immutable bytes in
+    session_state prevents the uploaded X-ray and its cached prediction from
+    disappearing when the user opens Reliability Readiness or Result Analysis
+    and then returns to the main app page.
+    """
+    if uploaded_file is None:
+        return st.session_state.get(ACTIVE_UPLOAD_KEY)
+
+    image_bytes = uploaded_file.getvalue()
+    if not image_bytes:
+        return st.session_state.get(ACTIVE_UPLOAD_KEY)
+
+    image_hash = hashlib.sha256(image_bytes).hexdigest()[:16]
+    active_upload = {
+        "name": uploaded_file.name,
+        "mime_type": getattr(uploaded_file, "type", "image/*") or "image/*",
+        "bytes": image_bytes,
+        "hash": image_hash,
+    }
+    previous = st.session_state.get(ACTIVE_UPLOAD_KEY)
+    st.session_state[ACTIVE_UPLOAD_KEY] = active_upload
+
+    # A different image invalidates only image-dependent widgets and results.
+    if not previous or previous.get("hash") != image_hash or previous.get("name") != uploaded_file.name:
+        st.session_state.pop("result_cache_key", None)
+        st.session_state.pop("last_prediction_result", None)
+
+    return active_upload
+
+
+def clear_active_upload() -> None:
+    for key in [ACTIVE_UPLOAD_KEY, "result_cache_key", "last_prediction_result", "xray_uploader_main"]:
+        st.session_state.pop(key, None)
+
+
+
 # ── 사이드바 ──────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(
@@ -662,7 +705,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-uploaded_file = None
+active_upload = st.session_state.get(ACTIVE_UPLOAD_KEY)
 
 # ── 메인 헤더 ─────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -680,7 +723,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── 이미지 업로드 안내 및 메인 업로더 ─────────────────────────────────────────
-if uploaded_file is None:
+if active_upload is None:
     st.markdown("""
     <div class="upload-hero">
         <div class="upload-kicker">Image input</div>
@@ -704,10 +747,26 @@ if uploaded_file is None:
             help="PA/AP 전면 흉부 X-ray 이미지(PNG 또는 JPEG)",
             key="xray_uploader_main",
         )
-    uploaded_file = main_uploaded_file
+    active_upload = persist_uploaded_image(main_uploaded_file)
+else:
+    st.markdown(
+        f"""
+        <div class="glass-card blue" style="margin-bottom:1rem;">
+            <div class="section-title">현재 보존된 분석 이미지</div>
+            <p style="color:#475569;margin:0;line-height:1.6;">
+                <b>{escape(active_upload.get('name', 'uploaded image'))}</b> · 화면을 Result Analysis 또는 Reliability Readiness로 전환해도
+                업로드 이미지와 마지막 분석 결과가 세션에 유지됩니다.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if st.button("다른 이미지 업로드하기", key="clear_active_upload", use_container_width=False):
+        clear_active_upload()
+        st.rerun()
 
 # ── 메인 콘텐츠 ───────────────────────────────────────────────────────────────
-if uploaded_file is None:
+if active_upload is None:
     feat_cols = st.columns(3)
     features = [
         ("Architecture", "DenseNet-121", "Dense connectivity 기반 경량 모델. 빠른 추론과 안정적 성능."),
@@ -743,10 +802,11 @@ if uploaded_file is None:
 
 else:
     # ── 이미지 업로드 완료 → 분석 ─────────────────────────────────────────────
-    image_bytes = uploaded_file.getvalue()
-    image = Image.open(io.BytesIO(image_bytes))
-    image_hash = hashlib.sha256(image_bytes).hexdigest()[:16]
-    result_cache_key = f"{uploaded_file.name}:{image_hash}:{selected_model_key}:{threshold:.2f}"
+    image_bytes = active_upload["bytes"]
+    filename = active_upload["name"]
+    image_hash = active_upload["hash"]
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    result_cache_key = f"{filename}:{image_hash}:{selected_model_key}:{threshold:.2f}"
 
     result = None
     if health:
@@ -755,7 +815,7 @@ else:
         else:
             model_label = MODEL_OPTIONS[selected_model_key]["label"]
             with st.spinner(f"{model_label} 모델로 분석 중..."):
-                result = call_predict_api(image_bytes, uploaded_file.name, selected_model_key, threshold)
+                result = call_predict_api(image_bytes, filename, selected_model_key, threshold)
             st.session_state["result_cache_key"] = result_cache_key
             st.session_state["last_prediction_result"] = result
 
@@ -765,7 +825,7 @@ else:
     with col_left:
         st.markdown('<div class="section-title">업로드된 이미지</div>', unsafe_allow_html=True)
         st.markdown('<div class="premium-card" style="padding:1.2rem; text-align:center;">', unsafe_allow_html=True)
-        st.image(image, width="stretch", caption=uploaded_file.name)
+        st.image(image, width="stretch", caption=filename)
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="section-title">Grad-CAM 시각화</div>', unsafe_allow_html=True)
@@ -944,7 +1004,7 @@ else:
                                 feedback_type=feedback_type,
                                 result=result,
                                 probs=probs,
-                                filename=uploaded_file.name,
+                                filename=filename,
                                 threshold=threshold,
                                 corrected_labels=corrected_labels,
                                 comment=clinician_comment,
