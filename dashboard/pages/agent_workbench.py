@@ -704,7 +704,7 @@ def render_agent_chat(result: dict) -> None:
 
 
 with st.sidebar:
-    st.markdown("### 🧠 Agentic Workbench")
+    st.markdown("### Agentic Workbench")
     st.caption("MedRAX식 multi-tool CXR 워크플로우")
     health = check_api_health()
     if health:
