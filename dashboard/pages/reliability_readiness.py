@@ -592,7 +592,7 @@ def _issue_dimension_ko(dimension: str) -> str:
     return {
         "calibration": "확률 보정성",
         "domain_robustness": "도메인 변화 강건성",
-        "localization": "병변 위치 집중도",
+        "localization": "판단 근거 위치 일관성",
         "hidden_stratification": "숨은 취약군",
     }.get(dimension, dimension)
 
