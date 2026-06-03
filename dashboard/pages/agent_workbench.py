@@ -814,7 +814,7 @@ def render_agent_chat(result: dict) -> None:
 
 
 with st.sidebar:
-    st.markdown("### Agentic Workbench")
+    st.markdown("### Agent Workbench")
     st.caption("MedRAX식 multi-tool CXR 워크플로우")
     health = check_api_health()
     if health:
@@ -831,7 +831,7 @@ st.markdown(
     """
 <div class="agent-header">
     <div class="eyebrow">MedRAX-inspired Runtime Agent</div>
-    <h1>Agentic Case Workbench</h1>
+    <h1>CXR-CAD - Agent Workbench</h1>
     <p>
         기존 CXR-CAD의 학습 완료 모델과 Grad-CAM, 판독문 초안, 의료진 피드백 큐는 그대로 유지하면서,
         여러 장의 X-ray/DICOM을 한 번에 입력하고 이미지별 결과·검진 초안·피드백·품질 점검·해부학 ROI·비교 요약을 제공하는 agent workbench입니다.
@@ -850,7 +850,7 @@ with st.expander("이 페이지가 기존 App과 다른 점", expanded=True):
     st.markdown(
         """
 - **기존 App**: 1장 중심 분석, Grad-CAM, 판독문 초안, 의료진 피드백을 안정적으로 유지합니다.
-- **Agentic Workbench**: 여러 장을 한 케이스 묶음으로 분석하고, MedRAX처럼 Agent와 후속 질문을 계속 주고받으며, 이미지별 결과와 전체 비교를 함께 제공합니다.
+- **Agent Workbench**: 여러 장을 한 케이스 묶음으로 분석하고, MedRAX처럼 Agent와 후속 질문을 계속 주고받으며, 이미지별 결과와 전체 비교를 함께 제공합니다.
 - **학습 과정 변경 없음**: 새 모델을 학습하지 않고 기존 `/predict`, Grad-CAM, report draft, feedback queue를 Agent 오케스트레이션으로 확장합니다.
         """
     )
