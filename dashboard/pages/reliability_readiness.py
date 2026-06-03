@@ -714,7 +714,6 @@ def _render_control_help(thresholds: dict[str, Any]) -> None:
     <b>조절 방법:</b> 현재 기준은 ECE ≥ {thresholds['ece_warn']:.3f}, Youden's J &lt; {thresholds['youden_min']:.2f},
     하위집단 격차 ≥ {thresholds['domain_gap_warn_pp']:.1f}pp, 외부기관 하락 ≥ {thresholds['external_drop_critical_pp']:.1f}pp,
     shortcut 비율 ≥ {thresholds['shortcut_warn']:.0%}일 때 경고를 띄웁니다.
-    더 안전하게 보려면 ECE/격차/하락/shortcut 기준은 낮추고, Youden's J 기준은 높이세요.
 </div>
 """,
         unsafe_allow_html=True,
