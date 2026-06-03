@@ -696,6 +696,7 @@ with st.sidebar:
     )
 
     st.divider()
+    st.page_link("pages/agent_workbench.py", label="Agentic Case Workbench")
     st.page_link("pages/analysis_results.py", label="상세 분석 결과 보기")
 
     st.divider()
@@ -718,6 +719,7 @@ st.markdown("""
         <span class="hero-pill">EfficientNet-B4</span>
         <span class="hero-pill">ViT-B/16</span>
         <span class="hero-pill">FastAPI /predict</span>
+        <span class="hero-pill">Agent /agent/analyze</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -770,7 +772,7 @@ if active_upload is None:
     feat_cols = st.columns(3)
     features = [
         ("Architecture", "DenseNet-121", "Dense connectivity 기반 경량 모델. 빠른 추론과 안정적 성능."),
-        ("Balanced", "EfficientNet-B4", "Compound Scaling으로 정확도와 효율의 균형을 맞춘 모델."),
+        ("Agentic", "Multi-image Workbench", "MedRAX식 다중 이미지·DICOM·비교 요약·이미지별 피드백 워크플로우."),
         ("Context", "ViT-B/16", "Self-Attention으로 영상 전역의 관계를 학습하는 모델."),
     ]
     for col, (tag, title, desc) in zip(feat_cols, features):

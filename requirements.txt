@@ -44,3 +44,4 @@ ipykernel>=6.29.0
 langchain>=0.3.0
 langchain-openai>=0.3.0
 openai>=1.30.0
+python-dotenv>=1.0.1       # .env 기반 API 키 로딩
