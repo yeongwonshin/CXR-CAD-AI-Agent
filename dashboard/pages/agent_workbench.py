@@ -296,25 +296,58 @@ def check_api_health() -> dict | None:
     return None
 
 
+def get_gradcam_risk_color(prob: float, threshold: float) -> str:
+    """Use the same red/yellow/teal risk palette as the main App Grad-CAM chart.
+
+    The Agent Workbench keeps the same prediction values as before; this only
+    changes the visual encoding so high-probability bars visually match the
+    Grad-CAM risk language already used on the main upload page.
+    """
+    if prob >= 0.5:
+        return "#e11d48"  # Grad-CAM-like hot red: high attention / high risk
+    if prob >= threshold:
+        return "#f59e0b"  # warning yellow/orange: above operating threshold
+    return "#14b8a6"      # teal/green: below threshold
+
+
 def render_bar_chart(probs: Dict[str, float], threshold: float) -> go.Figure:
     items = sorted(probs.items(), key=lambda item: item[1])
     labels = [DISEASE_LABELS_KR.get(k, k) for k, _ in items]
     values = [v for _, v in items]
+    colors = [get_gradcam_risk_color(v, threshold) for v in values]
+
     fig = go.Figure()
     fig.add_trace(go.Bar(
         y=labels,
         x=values,
         orientation="h",
+        marker=dict(color=colors),
         text=[f"{v:.1%}" for v in values],
         textposition="outside",
+        textfont=dict(size=11, family="Inter", color="#475569"),
         hovertemplate="<b>%{y}</b><br>확률: %{x:.2%}<extra></extra>",
     ))
-    fig.add_vline(x=threshold, line=dict(width=2, dash="dash"), annotation_text=f"임계값 {threshold:.0%}")
+    fig.add_vline(
+        x=threshold,
+        line=dict(color="#f59e0b", width=2, dash="dash"),
+        annotation=dict(
+            text=f"임계값 ({threshold:.0%})",
+            font=dict(size=10, color="#b45309"),
+            yref="paper",
+            y=1.05,
+        ),
+    )
     fig.update_layout(
-        height=430,
-        margin=dict(l=0, r=50, t=20, b=10),
-        xaxis=dict(range=[0, 1.1], tickformat=".0%", gridcolor="rgba(148,163,184,0.18)"),
-        yaxis=dict(tickfont=dict(size=12)),
+        height=480,
+        margin=dict(l=0, r=45, t=30, b=20),
+        xaxis=dict(
+            range=[0, 1.12],
+            tickformat=".0%",
+            showgrid=True,
+            gridcolor="rgba(148,163,184,0.18)",
+            tickfont=dict(size=10, family="Inter", color="#64748b"),
+        ),
+        yaxis=dict(tickfont=dict(size=12, family="Inter", color="#334155")),
         plot_bgcolor="rgba(255,255,255,0)",
         paper_bgcolor="rgba(255,255,255,0)",
         font=dict(family="Inter"),
