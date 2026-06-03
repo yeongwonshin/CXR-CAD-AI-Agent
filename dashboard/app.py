@@ -906,7 +906,7 @@ else:
                         아래 버튼으로 AI 판단 동의/불일치, Grad-CAM 위치 오류, 라벨 수정, 코멘트를 저장합니다.
                         저장된 항목은 즉시 재학습하지 않고 <b>검수 큐</b>에 쌓아 병원별 라벨 정제와 모델 개선 후보로 활용합니다.
                     </p>
-                    <span class="queue-badge">현재 검수 큐 {queue_count}건</span>
+                    <span class="queue-badge">현재 검수 기록 {queue_count}건</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
