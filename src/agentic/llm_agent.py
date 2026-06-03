@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -395,6 +396,179 @@ def _case_line(case: Mapping[str, Any]) -> str:
     return f"- {idx}. {filename}: {top_kr}({top}) {prob:.1%}, triage={triage.get('triage_label_kr','-')}, 품질={quality.get('quality_grade','-')}"
 
 
+
+_ORDINAL_WORDS = {
+    1: ["첫 번째", "첫번째", "첫 번", "첫번", "첫째", "첫 영상", "첫 사진"],
+    2: ["두 번째", "두번째", "두 번", "두번", "둘째", "두 영상", "두 사진"],
+    3: ["세 번째", "세번째", "세 번", "세번", "셋째", "세 영상", "세 사진"],
+    4: ["네 번째", "네번째", "네 번", "네번", "넷째"],
+    5: ["다섯 번째", "다섯번째", "다섯째"],
+    6: ["여섯 번째", "여섯번째", "여섯째"],
+    7: ["일곱 번째", "일곱번째", "일곱째"],
+    8: ["여덟 번째", "여덟번째", "여덟째"],
+    9: ["아홉 번째", "아홉번째", "아홉째"],
+    10: ["열 번째", "열번째", "열째"],
+}
+
+_DETAIL_REVIEW_TERMS = [
+    "주의", "우선", "먼저", "확인", "부분", "어디", "위치", "부위", "봐야", "보아야",
+    "해석", "분석", "읽어", "의료인", "의료진", "중요", "위험", "triage", "priority",
+    "interpret", "focus", "review", "where", "attention", "concern",
+]
+
+_AVAILABILITY_TERMS = [
+    "제공", "있어", "있나", "있나요", "없", "생성", "나와", "보여", "가능", "여부",
+    "available", "exist", "shown", "generated",
+]
+
+
+def _requested_case_indices(question: str, max_cases: int) -> List[int]:
+    """Find 1-based case numbers mentioned in Korean/English user questions."""
+    q = (question or "").lower()
+    found: List[int] = []
+
+    for match in re.finditer(r"(?:case|image|img|영상|사진|케이스)\s*#?\s*(10|[1-9])", q):
+        idx = int(match.group(1))
+        if 1 <= idx <= max_cases and idx not in found:
+            found.append(idx)
+    for match in re.finditer(r"제\s*(10|[1-9])\s*(?:번|번째|째)?", q):
+        idx = int(match.group(1))
+        if 1 <= idx <= max_cases and idx not in found:
+            found.append(idx)
+    for match in re.finditer(r"(?<!\d)(10|[1-9])\s*(?:번|번째|째)(?!\d)", q):
+        idx = int(match.group(1))
+        if 1 <= idx <= max_cases and idx not in found:
+            found.append(idx)
+
+    english = {
+        1: ["first", "1st"],
+        2: ["second", "2nd"],
+        3: ["third", "3rd"],
+        4: ["fourth", "4th"],
+        5: ["fifth", "5th"],
+    }
+    for idx, words in english.items():
+        if idx <= max_cases and any(re.search(rf"\b{re.escape(word)}\b", q) for word in words):
+            if idx not in found:
+                found.append(idx)
+
+    for idx, words in _ORDINAL_WORDS.items():
+        if idx <= max_cases and any(word in q for word in words):
+            if idx not in found:
+                found.append(idx)
+
+    return found
+
+
+def _select_cases(question: str, cases: Sequence[Mapping[str, Any]]) -> List[Mapping[str, Any]]:
+    case_list = list(cases or [])
+    indices = _requested_case_indices(question, len(case_list))
+    if not indices:
+        return case_list
+    selected: List[Mapping[str, Any]] = []
+    for idx in indices:
+        if 1 <= idx <= len(case_list):
+            selected.append(case_list[idx - 1])
+    return selected or case_list
+
+
+def _is_gradcam_question(question_l: str) -> bool:
+    return any(k in question_l for k in ["grad", "cam", "grad-cam", "히트맵", "heatmap", "근거"])
+
+
+def _is_detail_review_question(question_l: str) -> bool:
+    return any(k in question_l for k in _DETAIL_REVIEW_TERMS)
+
+
+def _is_gradcam_availability_question(question_l: str) -> bool:
+    # "Grad-CAM 있어?" should be a quick availability answer, but
+    # "세 번째 Grad-CAM에서 주의할 부분" must be interpreted as a review-priority question.
+    return _is_gradcam_question(question_l) and any(k in question_l for k in _AVAILABILITY_TERMS) and not _is_detail_review_question(question_l)
+
+
+def _top_probability_lines(case: Mapping[str, Any], limit: int = 4) -> List[str]:
+    lines = []
+    for item in list(case.get("top_probabilities") or [])[:limit]:
+        label = item.get("label") or item.get("disease") or "-"
+        label_kr = item.get("label_kr") or DISEASE_KR.get(str(label), str(label))
+        lines.append(f"{label_kr} {_safe_float(item.get('probability')):.1%}")
+    return lines
+
+
+def _format_focus_rois(case: Mapping[str, Any], limit: int = 3) -> List[str]:
+    anatomy = _as_dict(case.get("anatomy_assessment"))
+    rois = []
+    for roi in list(anatomy.get("focus_rois") or [])[:limit]:
+        r = _as_dict(roi)
+        label = r.get("label_kr") or r.get("label") or "ROI"
+        score = _safe_float(r.get("priority_score"))
+        hint = _truncate_text(r.get("review_hint"), 150)
+        if hint:
+            rois.append(f"{label}({score:.1%}) — {hint}")
+        else:
+            rois.append(f"{label}({score:.1%})")
+    if not rois:
+        order = anatomy.get("recommended_review_order") or []
+        rois.extend(map(str, order[:limit]))
+    return rois
+
+
+def _answer_gradcam_availability(cases: Sequence[Mapping[str, Any]]) -> str:
+    lines = ["Grad-CAM 제공 여부입니다."]
+    for case in cases:
+        lines.append(f"- {case.get('index')}. {case.get('filename')}: {'제공됨' if case.get('has_gradcam') else '없음 또는 Placeholder'}")
+    return "\n".join(lines)
+
+
+def _answer_case_review_priority(question: str, cases: Sequence[Mapping[str, Any]], *, gradcam_context: bool = False) -> str:
+    selected = _select_cases(question, cases)
+    if not selected:
+        return "분석된 케이스가 없어 우선 확인 부위를 특정할 수 없습니다."
+
+    lines: List[str] = []
+    if gradcam_context:
+        lines.append("질문을 Grad-CAM의 단순 제공 여부가 아니라, 해당 영상에서 의료진이 우선 확인할 부위/소견 질문으로 해석했습니다.")
+    else:
+        lines.append("의료진 우선 확인 포인트입니다.")
+
+    for case in selected:
+        idx = case.get("index")
+        filename = case.get("filename") or f"case-{idx}"
+        top = case.get("top_disease") or "-"
+        top_kr = case.get("top_disease_kr") or DISEASE_KR.get(str(top), str(top))
+        prob = _safe_float(case.get("top_probability"))
+        triage = _as_dict(case.get("triage_assessment"))
+        quality = _as_dict(case.get("quality_check"))
+        rois = _format_focus_rois(case)
+        top_probs = _top_probability_lines(case)
+
+        lines.append(f"\n{idx}. {filename}")
+        if gradcam_context:
+            if case.get("has_gradcam"):
+                lines.append("- Grad-CAM: 제공됨. 화면의 고활성 영역이 아래 우선 소견/ROI와 실제로 겹치는지 원본 영상에서 확인하십시오.")
+            else:
+                lines.append("- Grad-CAM: 없음 또는 Placeholder입니다. 따라서 실제 히트맵 위치 판정은 불가하며, 아래 내용은 분류 결과와 ROI 스캐폴드 기반의 우선 검토 가이드입니다.")
+        lines.append(f"- 우선 소견: {top_kr}({top}) {prob:.1%}")
+        if top_probs:
+            lines.append("- 함께 볼 상위 확률: " + "; ".join(top_probs[:4]))
+        if triage:
+            reason = _truncate_text(triage.get("reason"), 180)
+            lines.append(f"- 검토 우선도: {triage.get('triage_label_kr') or '-'} — {reason or '-'}")
+        if rois:
+            lines.append("- 먼저 확인할 해부학 부위:")
+            for roi_line in rois[:3]:
+                lines.append(f"  · {roi_line}")
+        flags = quality.get("flags") or []
+        if flags:
+            lines.append("- 품질/아티팩트 확인: " + "; ".join(map(str, flags[:3])))
+        impression = case.get("impression_kr") or case.get("findings_kr")
+        if impression:
+            lines.append(f"- 판독 초안 참고: {_truncate_text(impression, 220)}")
+
+    lines.append("\n※ Grad-CAM은 진단 확정 근거가 아니라 모델 주목 영역입니다. 의료진은 원본 영상, 임상정보, 이전 영상과 함께 확인해야 합니다.")
+    return "\n".join(lines)
+
+
 def fallback_agent_reply(question: str, compact_result: Mapping[str, Any], *, include_notice: bool = True) -> str:
     """Deterministic backup or fast tool-context answer."""
     question_l = (question or "").lower()
@@ -430,23 +604,26 @@ def fallback_agent_reply(question: str, compact_result: Mapping[str, Any], *, in
             lines.append(f"- {DISEASE_KR.get(disease, disease)}: 변화량 {delta:+.1%}p")
     elif any(k in question_l for k in ["품질", "화질", "흐림", "quality", "재촬영"]):
         lines.append("영상 품질 점검 결과입니다.")
-        for case in cases:
+        for case in _select_cases(question, cases):
             quality = _as_dict(case.get("quality_check"))
             flags = quality.get("flags") or []
             lines.append(_case_line(case))
             if flags:
                 lines.append("  · " + "; ".join(map(str, flags[:3])))
-    elif any(k in question_l for k in ["grad", "cam", "히트맵", "근거"]):
-        lines.append("Grad-CAM 제공 여부입니다.")
-        for case in cases:
-            lines.append(f"- {case.get('index')}. {case.get('filename')}: {'제공됨' if case.get('has_gradcam') else '없음 또는 Placeholder'}")
+    elif _is_gradcam_question(question_l):
+        if _is_gradcam_availability_question(question_l):
+            lines.append(_answer_gradcam_availability(_select_cases(question, cases)))
+        else:
+            lines.append(_answer_case_review_priority(question, cases, gradcam_context=True))
+    elif any(k in question_l for k in ["우선", "먼저", "응급", "위험", "주의", "의료인", "의료진", "triage", "priority"]):
+        lines.append(_answer_case_review_priority(question, cases, gradcam_context=False))
     elif any(k in question_l for k in ["판독", "초안", "소견", "report", "draft"]):
         lines.append("이미지별 판독 초안 요약입니다.")
-        for case in cases:
+        for case in _select_cases(question, cases):
             lines.append(f"\n{case.get('index')}. {case.get('filename')}\n- Findings: {case.get('findings_kr') or '-'}\n- Impression: {case.get('impression_kr') or '-'}")
     elif any(k in question_l for k in ["roi", "해부학", "위치", "어디", "location"]):
         lines.append("해부학 ROI 스캐폴드 기준 검토 순서입니다. 이는 학습된 segmentation mask가 아니라 검토 보조 위치입니다.")
-        for case in cases:
+        for case in _select_cases(question, cases):
             anatomy = _as_dict(case.get("anatomy_assessment"))
             order = anatomy.get("recommended_review_order") or []
             lines.append(f"- {case.get('index')}. {case.get('filename')}: {', '.join(map(str, order[:5])) if order else '-'}")
@@ -469,7 +646,7 @@ def _fastpath_supported(question: str) -> bool:
         "grad", "cam", "히트맵", "근거",
         "판독", "초안", "소견", "report", "draft",
         "roi", "해부학", "위치", "어디", "location",
-        "우선", "응급", "위험", "triage", "먼저", "priority",
+        "우선", "응급", "위험", "주의", "확인", "의료인", "의료진", "triage", "먼저", "priority",
     ]
     if any(k in q for k in keywords):
         return True
