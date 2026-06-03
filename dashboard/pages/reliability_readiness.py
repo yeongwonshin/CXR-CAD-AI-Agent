@@ -590,7 +590,7 @@ def _metric_card(title: str, value: str, hint: str, tone: str = "neutral") -> No
 
 def _issue_dimension_ko(dimension: str) -> str:
     return {
-        "calibration": "확률 보정",
+        "calibration": "확률 보정성",
         "domain_robustness": "기관·하위집단 견고성",
         "localization": "병변 위치 집중도",
         "hidden_stratification": "숨은 취약군",
