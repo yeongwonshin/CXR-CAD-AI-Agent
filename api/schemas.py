@@ -60,6 +60,13 @@ class PredictionResult(BaseModel):
     Need_Review_Reason: str       = Field(..., description="의료진 검토가 필요한 이유 또는 주의사항")
     Clinical_Report:   Dict[str, Any] = Field(..., description="한국어/영문 판독문 초안과 주요 소견 요약")
 
+    # ── MedRAX-style runtime agent enrichments ───────────────────────────────
+    Image_Metadata: Dict[str, Any] = Field(default_factory=dict, description="입력 이미지/DICOM 메타데이터와 크기 정보")
+    Quality_Check: Dict[str, Any] = Field(default_factory=dict, description="해상도·밝기·대비·선예도 기반 입력 영상 품질 점검")
+    Anatomy_Assessment: Dict[str, Any] = Field(default_factory=dict, description="질환별 해부학적 ROI 검토 스캐폴드")
+    Triage_Assessment: Dict[str, Any] = Field(default_factory=dict, description="Agent 기반 우선 검토 등급과 사유")
+    Agent_Summary: str = Field(default="", description="해당 이미지에 대한 Agent 요약")
+
     model_config = {
         "json_schema_extra": {
             "examples": [{
@@ -95,6 +102,34 @@ class PredictionResult(BaseModel):
             }]
         }
     }
+
+
+class AgentCaseResult(BaseModel):
+    """MedRAX-style multi-image agent case result."""
+
+    filename: str = Field(..., description="업로드 파일명")
+    case_id: str = Field(..., description="케이스 ID")
+    prediction: PredictionResult = Field(..., description="기존 /predict와 동일한 단일 이미지 추론 결과")
+    probabilities: Dict[str, float] = Field(default_factory=dict, description="질환별 확률 요약")
+    top_disease: str = Field(..., description="Top1 질환")
+    top_probability: float = Field(..., ge=0.0, le=1.0, description="Top1 질환 확률")
+    detected_diseases: List[str] = Field(default_factory=list, description="임계값 이상 질환")
+    report_draft: str = Field(default="", description="해당 이미지별 판독문 초안")
+    agent_profile: Dict[str, Any] = Field(default_factory=dict, description="품질·해부학 ROI·triage·DICOM 메타데이터")
+    is_placeholder: bool = Field(..., description="Placeholder 응답 여부")
+
+
+class AgentBatchResponse(BaseModel):
+    """POST /agent/analyze 응답 스키마."""
+
+    status: str = Field(..., description="처리 상태")
+    model_key: str = Field(..., description="사용 모델 키")
+    threshold: float = Field(..., ge=0.0, le=1.0, description="감지 임계값")
+    case_count: int = Field(..., ge=0, description="분석된 이미지 수")
+    cases: List[AgentCaseResult] = Field(default_factory=list, description="이미지별 결과")
+    agent_summary: Dict[str, Any] = Field(default_factory=dict, description="다중 이미지 비교·triage·사용자 질문 기반 요약")
+    tool_trace: List[Dict[str, Any]] = Field(default_factory=list, description="Agent 도구 호출 감사 로그")
+    safety_note: str = Field(default="본 결과는 최종 진단이 아니며 의료진 검토가 필요합니다.", description="안전 고지")
 
 
 FeedbackType = Literal[
