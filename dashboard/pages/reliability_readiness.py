@@ -131,18 +131,177 @@ st.markdown(
     .readiness-header .eyebrow { color:#a7f3d0 !important; font-size:0.72rem; letter-spacing:0.16em; text-transform:uppercase; font-weight:800; margin-bottom:0.35rem; }
     .readiness-header h1 { margin:0; font-size:1.72rem; font-weight:850; color:white !important; letter-spacing:-0.03em; }
     .readiness-header p { margin:0.35rem 0 0; font-size:0.9rem; color:#dbeafe !important; line-height:1.5; }
-    .readiness-badge {
-        border-radius: 18px;
-        padding: 1rem 1.15rem;
-        margin: 0.7rem 0 0.8rem;
-        border: 1px solid rgba(148,163,184,0.24);
-        box-shadow: 0 16px 34px rgba(15,23,42,0.08);
+    .quick-guide {
+        display:grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.8rem;
+        margin: 0.2rem 0 1.05rem;
     }
-    .readiness-badge.pass { background: linear-gradient(135deg, #ecfdf5, #dbeafe); border-color: rgba(20,184,166,0.32); }
-    .readiness-badge.warning { background: linear-gradient(135deg, #fff7ed, #fef3c7); border-color: rgba(245,158,11,0.44); }
-    .readiness-badge.critical { background: linear-gradient(135deg, #fff1f2, #ffe4e6); border-color: rgba(225,29,72,0.36); }
-    .readiness-badge h3 { margin:0; color:#0f172a !important; font-size:1rem; font-weight:850; }
-    .readiness-badge p { margin:0.32rem 0 0; color:#475569 !important; font-size:0.86rem; line-height:1.48; }
+    .guide-card {
+        position: relative;
+        overflow: hidden;
+        border-radius: 22px;
+        padding: 1rem 1.05rem;
+        background: rgba(255,255,255,0.92);
+        border: 1px solid rgba(148,163,184,0.22);
+        box-shadow: 0 16px 36px rgba(15,23,42,0.07);
+    }
+    .guide-card::after {
+        content:"";
+        position:absolute;
+        inset:auto -22% -44% auto;
+        width: 130px;
+        height: 130px;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(56,189,248,0.22), transparent 65%);
+    }
+    .guide-card .step {
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        width: 30px;
+        height: 30px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #0ea5e9, #2563eb);
+        color:#ffffff;
+        font-size:0.78rem;
+        font-weight:900;
+        box-shadow: 0 8px 20px rgba(37,99,235,0.30);
+    }
+    .guide-card h4 { margin:0.72rem 0 0.24rem; color:#0f172a !important; font-size:0.96rem; font-weight:900; }
+    .guide-card p { margin:0; color:#475569 !important; font-size:0.81rem; line-height:1.48; }
+    .readiness-badge {
+        position: relative;
+        overflow: hidden;
+        border-radius: 18px;
+        padding: 1.18rem 1.25rem;
+        margin: 0.7rem 0 0.8rem;
+        border: 2px solid rgba(148,163,184,0.24);
+        box-shadow: 0 20px 48px rgba(15,23,42,0.16);
+    }
+    .readiness-badge::before {
+        content:"";
+        position:absolute;
+        inset:0 auto 0 0;
+        width: 10px;
+        background: #64748b;
+    }
+    .readiness-badge::after {
+        content:"";
+        position:absolute;
+        right:-58px;
+        top:-72px;
+        width: 190px;
+        height: 190px;
+        border-radius: 999px;
+        opacity: 0.55;
+    }
+    .readiness-badge.pass { background: linear-gradient(135deg, #dcfce7, #ecfeff 62%, #eff6ff); border-color: rgba(5,150,105,0.62); }
+    .readiness-badge.pass::before { background: linear-gradient(180deg, #059669, #10b981); }
+    .readiness-badge.pass::after { background: radial-gradient(circle, rgba(16,185,129,0.28), transparent 67%); }
+    .readiness-badge.warning { background: linear-gradient(135deg, #ffedd5, #fef3c7 58%, #fff7ed); border-color: rgba(217,119,6,0.72); }
+    .readiness-badge.warning::before { background: linear-gradient(180deg, #d97706, #f59e0b); }
+    .readiness-badge.warning::after { background: radial-gradient(circle, rgba(245,158,11,0.34), transparent 67%); }
+    .readiness-badge.critical { background: linear-gradient(135deg, #ffe4e6, #fee2e2 55%, #fff1f2); border-color: rgba(190,18,60,0.78); }
+    .readiness-badge.critical::before { background: linear-gradient(180deg, #be123c, #ef4444); }
+    .readiness-badge.critical::after { background: radial-gradient(circle, rgba(225,29,72,0.35), transparent 67%); }
+    .readiness-badge h3 { margin:0; color:#0f172a !important; font-size:1.28rem; font-weight:950; letter-spacing:-0.02em; text-shadow: 0 1px 0 rgba(255,255,255,0.55); }
+    .readiness-badge p { margin:0.38rem 0 0; color:#334155 !important; font-size:0.92rem; line-height:1.55; font-weight:750; }
+    .readiness-chip {
+        display:inline-flex;
+        align-items:center;
+        gap:0.38rem;
+        border-radius: 999px;
+        padding:0.26rem 0.62rem;
+        margin-bottom:0.52rem;
+        background: rgba(15,23,42,0.08);
+        color:#0f172a !important;
+        font-size:0.74rem;
+        font-weight:900;
+        letter-spacing:0.08em;
+        text-transform: uppercase;
+    }
+    .judgment-panel {
+        border-radius: 22px;
+        padding: 1rem 1.12rem;
+        margin: -0.15rem 0 1rem;
+        border: 1px solid rgba(37,99,235,0.18);
+        background:
+            radial-gradient(circle at 98% 0%, rgba(56,189,248,0.20), transparent 34%),
+            linear-gradient(135deg, rgba(255,255,255,0.96), rgba(239,246,255,0.94));
+        box-shadow: 0 16px 38px rgba(15,23,42,0.08);
+    }
+    .judgment-panel h4 { margin:0 0 0.55rem; color:#0f172a !important; font-size:1rem; font-weight:950; }
+    .judgment-list { margin:0; padding-left:1.05rem; color:#334155 !important; font-size:0.86rem; line-height:1.62; }
+    .judgment-list li { margin:0.22rem 0; }
+    .rr-metric {
+        min-height: 126px;
+        border-radius: 22px;
+        padding: 1rem 1.02rem;
+        background: rgba(255,255,255,0.92);
+        border: 1px solid rgba(148,163,184,0.24);
+        box-shadow: 0 16px 34px rgba(15,23,42,0.06);
+        position:relative;
+        overflow:hidden;
+    }
+    .rr-metric::after {
+        content:"";
+        position:absolute;
+        right:-46px;
+        bottom:-58px;
+        width:120px;
+        height:120px;
+        border-radius:999px;
+        background: radial-gradient(circle, rgba(59,130,246,0.15), transparent 70%);
+    }
+    .rr-metric.good { border-color: rgba(16,185,129,0.32); }
+    .rr-metric.warn { border-color: rgba(245,158,11,0.42); }
+    .rr-metric.danger { border-color: rgba(225,29,72,0.42); }
+    .rr-metric.neutral { border-color: rgba(148,163,184,0.24); }
+    .rr-metric .label { color:#64748b !important; font-size:0.74rem; font-weight:850; letter-spacing:0.05em; text-transform:uppercase; }
+    .rr-metric .value { color:#0f172a !important; font-size:1.62rem; font-weight:950; letter-spacing:-0.04em; margin-top:0.22rem; }
+    .rr-metric .hint { color:#475569 !important; font-size:0.78rem; line-height:1.42; margin-top:0.35rem; font-weight:650; }
+    .term-table-wrap {
+        border-radius: 20px;
+        border: 1px solid rgba(148,163,184,0.20);
+        overflow: hidden;
+        box-shadow: 0 10px 28px rgba(15,23,42,0.05);
+    }
+    .term-grid {
+        width:100%;
+        border-collapse:collapse;
+        background:#ffffff;
+    }
+    .term-grid th {
+        background:#0f172a;
+        color:#e0f2fe !important;
+        font-size:0.78rem;
+        text-align:left;
+        padding:0.74rem 0.82rem;
+    }
+    .term-grid td {
+        color:#334155 !important;
+        font-size:0.80rem;
+        line-height:1.48;
+        padding:0.74rem 0.82rem;
+        border-top:1px solid rgba(226,232,240,0.95);
+        vertical-align:top;
+    }
+    .term-grid td:first-child { font-weight:900; color:#0f172a !important; white-space:nowrap; }
+    .issue-help {
+        border-radius: 18px;
+        padding: 0.82rem 0.95rem;
+        background: linear-gradient(135deg, rgba(239,246,255,0.96), rgba(240,253,250,0.92));
+        border: 1px solid rgba(14,165,233,0.18);
+        color:#334155 !important;
+        font-size:0.82rem;
+        line-height:1.56;
+        margin-top:0.65rem;
+    }
+    .section-title-note { color:#64748b !important; font-size:0.84rem; line-height:1.55; margin-top:-0.25rem; }
+    @media (max-width: 900px) {
+        .quick-guide { grid-template-columns: 1fr; }
+    }
     [data-testid="stMetric"] {
         background: rgba(255,255,255,0.92);
         border: 1px solid rgba(148,163,184,0.24);
@@ -390,20 +549,176 @@ def _adjustable_report(metrics: dict[str, Any], thresholds: dict[str, Any]) -> d
     }
 
 
+def _finite(value: Any) -> bool:
+    try:
+        return bool(np.isfinite(float(value)))
+    except Exception:
+        return False
+
+
+def _metric_value(value: Any, fmt: str = "{:.3f}", empty: str = "—") -> str:
+    if not _finite(value):
+        return empty
+    return fmt.format(float(value))
+
+
+def _metric_tone(value: Any, warn_value: float | None = None, direction: str = "low_is_good") -> str:
+    if not _finite(value) or warn_value is None:
+        return "neutral"
+    val = float(value)
+    if direction == "low_is_good":
+        if val >= warn_value:
+            return "warn"
+        return "good"
+    if val < warn_value:
+        return "warn"
+    return "good"
+
+
+def _metric_card(title: str, value: str, hint: str, tone: str = "neutral") -> None:
+    st.markdown(
+        f"""
+<div class="rr-metric {tone}">
+    <div class="label">{title}</div>
+    <div class="value">{value}</div>
+    <div class="hint">{hint}</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def _issue_dimension_ko(dimension: str) -> str:
+    return {
+        "calibration": "확률 보정",
+        "domain_robustness": "기관·하위집단 견고성",
+        "localization": "병변 위치 집중도",
+        "hidden_stratification": "숨은 취약군",
+    }.get(dimension, dimension)
+
+
+def _issue_severity_ko(severity: str) -> str:
+    return {"critical": "위험", "warning": "주의", "pass": "양호"}.get(severity, severity)
+
+
+def _judgment_basis(report: dict[str, Any], metrics: dict[str, Any], thresholds: dict[str, Any]) -> list[str]:
+    issues = report.get("issues", [])
+    if not issues:
+        return [
+            "현재 조절 기준에서 ECE, Youden's J, 외부기관 성능 하락, 하위집단 격차, shortcut 비율이 경고선을 넘지 않았습니다.",
+            "따라서 즉시 무제한 운영이 아니라, 정기 모니터링을 붙인 제한적 배치 가능 상태로 해석합니다.",
+        ]
+
+    basis = []
+    for issue in issues[:5]:
+        basis.append(
+            f"{_issue_dimension_ko(issue.get('dimension', ''))}: {_issue_severity_ko(issue.get('severity', ''))} — "
+            f"{issue.get('message', '')}. 권장 조치: {issue.get('recommended_action', '')}."
+        )
+    if len(issues) > 5:
+        basis.append(f"그 밖에도 {len(issues) - 5}개 항목이 추가로 경고 목록에 포함되었습니다.")
+    return basis
+
+
 def _badge(status: str) -> None:
     if status == "critical":
         title = "CRITICAL — 배치 차단 권고"
-        body = "중대한 신뢰성 위험이 있어 문제를 해결하기 전까지 배치를 보류하는 상태입니다."
+        body = "중대한 신뢰성 위험이 기준을 넘었습니다. 문제를 해결하기 전까지 실제 임상 배치를 보류하는 상태입니다."
+        chip = "BLOCK DEPLOYMENT"
         css_class = "critical"
     elif status == "warning":
         title = "WARNING — 검토 후 제한 배치 권고"
-        body = "경고 항목 검토와 보정 후 제한적 배치를 고려해야 하는 상태입니다."
+        body = "주의 항목이 발견되었습니다. 원인 확인·보정·하위집단 재검증 후 제한 배치를 고려해야 합니다."
+        chip = "REVIEW BEFORE DEPLOYMENT"
         css_class = "warning"
     else:
-        title = "PASS — routine monitoring 권고"
-        body = "현재 기준에서는 정기 모니터링 조건으로 배치 가능성이 높은 상태입니다."
+        title = "PASS — 정기 모니터링 조건 배치 가능"
+        body = "현재 기준에서는 주요 신뢰성 위험이 경고선을 넘지 않았습니다. 단, 배치 후 성능·보정·하위집단 지표는 계속 추적해야 합니다."
+        chip = "ROUTINE MONITORING"
         css_class = "pass"
-    st.markdown(f'<div class="readiness-badge {css_class}"><h3>{title}</h3><p>{body}</p></div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="readiness-badge {css_class}"><div class="readiness-chip">{chip}</div><h3>{title}</h3><p>{body}</p></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_judgment_basis(report: dict[str, Any], metrics: dict[str, Any], thresholds: dict[str, Any]) -> None:
+    items = "".join(f"<li>{text}</li>" for text in _judgment_basis(report, metrics, thresholds))
+    st.markdown(
+        f"""
+<div class="judgment-panel">
+    <h4>판단 근거</h4>
+    <ul class="judgment-list">{items}</ul>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_quick_guide() -> None:
+    st.markdown(
+        """
+<div class="quick-guide">
+    <div class="guide-card">
+        <div class="step">1</div>
+        <h4>모델·질환 선택</h4>
+        <p>왼쪽에서 DenseNet, EfficientNet, ViT와 판독 대상 질환을 고릅니다. 지표는 선택한 모델·질환 기준으로 즉시 다시 계산됩니다.</p>
+    </div>
+    <div class="guide-card">
+        <div class="step">2</div>
+        <h4>경고 기준 조절</h4>
+        <p>보수적으로 판단하려면 ECE, subgroup gap, external drop, shortcut 기준을 낮추고, Youden's J 기준은 높입니다.</p>
+    </div>
+    <div class="guide-card">
+        <div class="step">3</div>
+        <h4>판단 근거 확인</h4>
+        <p>상단 배치 판단 아래의 근거와 Integrated issues를 먼저 보고, 어떤 지표 때문에 PASS/WARNING/CRITICAL인지 확인합니다.</p>
+    </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_term_expander() -> None:
+    with st.expander("용어설명 자세히 보기", expanded=False):
+        st.markdown(
+            """
+<div class="term-table-wrap">
+<table class="term-grid">
+    <thead><tr><th>용어</th><th>쉬운 의미</th><th>사용자가 조절할 때의 해석</th></tr></thead>
+    <tbody>
+        <tr><td>AUROC</td><td>양성/음성 환자를 얼마나 잘 구분하는지 보는 전체 판별력입니다. 1에 가까울수록 좋습니다.</td><td>직접 조절하는 값은 아니며, 모델 성능을 읽는 핵심 결과값입니다.</td></tr>
+        <tr><td>ECE</td><td>모델이 “80% 확률”이라고 말했을 때 실제로도 비슷한 비율로 맞는지 보는 확률 보정 오차입니다. 낮을수록 좋습니다.</td><td>ECE warning threshold를 낮추면 더 엄격해지고, 높이면 더 관대해집니다. 의료 배치 전에는 보통 낮게 잡는 편이 안전합니다.</td></tr>
+        <tr><td>Youden's J</td><td>민감도와 특이도를 함께 고려한 임계값 품질 지표입니다. 높을수록 양성과 음성을 균형 있게 나눈다는 뜻입니다.</td><td>Minimum Youden's J를 높이면 “충분히 좋은 운영 임계값”만 통과시킵니다.</td></tr>
+        <tr><td>Threshold</td><td>질환 확률이 몇 % 이상이면 양성으로 볼지 정하는 기준선입니다.</td><td>놓치면 안 되는 질환은 낮게, 과잉 알림을 줄이고 싶으면 높게 운영합니다.</td></tr>
+        <tr><td>Sensitivity</td><td>실제 질환자를 양성으로 잡아내는 비율입니다. 높을수록 놓침이 줄어듭니다.</td><td>응급·중증 질환에서는 민감도를 더 중시합니다.</td></tr>
+        <tr><td>Specificity</td><td>실제 정상/음성인 경우를 음성으로 잘 걸러내는 비율입니다. 높을수록 불필요한 알림이 줄어듭니다.</td><td>검수 부담이 큰 운영 환경에서는 특이도도 함께 봐야 합니다.</td></tr>
+        <tr><td>Subgroup gap</td><td>나이, 성별, 촬영 자세 같은 하위집단 사이의 AUROC 차이입니다. 작을수록 특정 집단에 덜 치우칩니다.</td><td>Subgroup gap warning threshold를 낮추면 하위집단 불균형에 더 민감하게 경고합니다.</td></tr>
+        <tr><td>External drop</td><td>다른 병원/외부 데이터에서 성능이 얼마나 떨어지는지 보는 값입니다.</td><td>External drop critical threshold를 낮추면 외부기관 일반화 실패를 더 강하게 차단합니다.</td></tr>
+        <tr><td>Shortcut ratio</td><td>폐 병변 대신 마커, 테두리, 문자, 기기 흔적 같은 엉뚱한 단서에 의존할 위험 신호입니다.</td><td>Shortcut ratio warning threshold를 낮추면 Grad-CAM/ROI 검증을 더 엄격하게 요구합니다.</td></tr>
+        <tr><td>Hidden strata</td><td>전체 평균은 좋아도 특정 숨은 환자군에서만 성능이 나쁜지 찾는 검사입니다.</td><td>Cluster count를 늘리면 더 세분화해서 찾고, Minimum stratum size를 높이면 너무 작은 군집을 무시합니다.</td></tr>
+        <tr><td>pp</td><td>percentage point의 약자입니다. 예: 90%에서 87%로 떨어지면 3pp 하락입니다.</td><td>AUROC gap/drop 같은 차이를 읽을 때 쓰는 단위입니다.</td></tr>
+    </tbody>
+</table>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+
+def _render_control_help(thresholds: dict[str, Any]) -> None:
+    st.markdown(
+        f"""
+<div class="issue-help">
+    <b>조절 방법:</b> 현재 기준은 ECE ≥ {thresholds['ece_warn']:.3f}, Youden's J &lt; {thresholds['youden_min']:.2f},
+    하위집단 격차 ≥ {thresholds['domain_gap_warn_pp']:.1f}pp, 외부기관 하락 ≥ {thresholds['external_drop_critical_pp']:.1f}pp,
+    shortcut 비율 ≥ {thresholds['shortcut_warn']:.0%}일 때 경고를 띄웁니다.
+    더 안전하게 보려면 ECE/격차/하락/shortcut 기준은 낮추고, Youden's J 기준은 높이세요.
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 op_df = _load_csv("op_analysis.csv")
@@ -448,16 +763,17 @@ with st.sidebar:
         disease = None
         st.warning("test_predictions.csv에서 *_true / *_prob 컬럼을 찾지 못했습니다.")
 
-    st.markdown("### Risk thresholds")
-    ece_warn = st.slider("ECE warning threshold", 0.00, 0.20, 0.05, 0.005)
-    youden_min = st.slider("Minimum Youden's J", 0.00, 1.00, 0.60, 0.01)
-    domain_gap_warn_pp = st.slider("Subgroup gap warning threshold (pp)", 0.0, 15.0, 3.0, 0.5)
-    external_drop_critical_pp = st.slider("External drop critical threshold (pp)", 0.0, 15.0, 3.0, 0.5)
-    shortcut_warn = st.slider("Shortcut ratio warning threshold", 0.00, 0.50, 0.05, 0.01)
+    st.markdown("### 배치 판단 기준")
+    st.caption("기준을 낮추면 더 엄격하게, 높이면 더 관대하게 판정합니다. 단, Youden's J는 높일수록 더 엄격합니다.")
+    ece_warn = st.slider("ECE 경고 기준", 0.00, 0.20, 0.05, 0.005, help="확률 보정 오차입니다. 낮을수록 좋고, 이 값 이상이면 경고로 봅니다.")
+    youden_min = st.slider("최소 Youden's J", 0.00, 1.00, 0.60, 0.01, help="민감도와 특이도를 함께 보는 운영 임계값 품질입니다. 이 값보다 낮으면 경고로 봅니다.")
+    domain_gap_warn_pp = st.slider("하위집단 격차 경고 기준 (pp)", 0.0, 15.0, 3.0, 0.5, help="나이/성별/촬영자세 집단 사이 AUROC 차이입니다. 이 값 이상이면 경고로 봅니다.")
+    external_drop_critical_pp = st.slider("외부기관 성능 하락 차단 기준 (pp)", 0.0, 15.0, 3.0, 0.5, help="외부 데이터에서 AUROC가 이 값 이상 떨어지면 CRITICAL로 봅니다.")
+    shortcut_warn = st.slider("Shortcut 비율 경고 기준", 0.00, 0.50, 0.05, 0.01, help="폐 영역 밖 단서에 의존할 위험 비율입니다. 이 값 이상이면 경고로 봅니다.")
 
-    st.markdown("### Hidden-strata proxy")
-    n_clusters = st.slider("Cluster count", 2, 8, 4, 1)
-    min_size = st.slider("Minimum stratum size", 10, 200, 20, 10)
+    st.markdown("### 숨은 취약군 탐색")
+    n_clusters = st.slider("군집 개수", 2, 8, 4, 1, help="더 크게 잡으면 환자군을 더 세분화해 숨은 취약군을 찾습니다.")
+    min_size = st.slider("최소 군집 크기", 10, 200, 20, 10, help="너무 작은 군집을 경고에서 제외하기 위한 최소 표본 수입니다.")
 
 metrics: dict[str, Any] = {}
 threshold_for_error = 0.5
@@ -509,49 +825,127 @@ thresholds = {
 }
 report = _adjustable_report(metrics, thresholds)
 
+_render_quick_guide()
+_render_term_expander()
+_render_control_help(thresholds)
+
 _badge(report["overall_status"])
-st.write(report["deployment_recommendation"])
+_render_judgment_basis(report, metrics, thresholds)
 
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Target AUROC", "—" if not np.isfinite(metrics.get("auroc", float("nan"))) else f"{metrics['auroc']:.3f}")
-m2.metric("ECE", "—" if not np.isfinite(metrics.get("ece", float("nan"))) else f"{metrics['ece']:.3f}")
-m3.metric("Best Youden's J", "—" if not np.isfinite(metrics.get("youden_j", float("nan"))) else f"{metrics['youden_j']:.3f}")
-m4.metric("Shortcut ratio", "—" if not np.isfinite(metrics.get("shortcut_ratio", float("nan"))) else f"{metrics['shortcut_ratio']:.1%}")
+st.subheader("핵심 지표 한눈에 보기")
+st.markdown(
+    '<p class="section-title-note">색이 진한 카드는 현재 기준에서 먼저 확인해야 하는 항목입니다. 숫자만 보지 말고 카드 하단의 해석을 함께 확인하세요.</p>',
+    unsafe_allow_html=True,
+)
 
-m5, m6, m7, m8 = st.columns(4)
-m5.metric("View gap", "—" if not np.isfinite(view_gap) else f"{view_gap:.1f}pp")
-m6.metric("Age gap", "—" if not np.isfinite(age_gap) else f"{age_gap:.1f}pp")
-m7.metric("External drop", "—" if not np.isfinite(metrics.get("external_drop_pp", float("nan"))) else f"{metrics['external_drop_pp']:.1f}pp")
-m8.metric("Hidden strata flagged", metrics.get("hidden_flagged_count", "—"))
+row1 = st.columns(4)
+with row1[0]:
+    _metric_card(
+        "Target AUROC",
+        _metric_value(metrics.get("auroc"), "{:.3f}"),
+        "선택 질환의 전체 판별력입니다. 1에 가까울수록 좋습니다.",
+        _metric_tone(metrics.get("auroc"), 0.80, "high_is_good"),
+    )
+with row1[1]:
+    _metric_card(
+        "ECE",
+        _metric_value(metrics.get("ece"), "{:.3f}"),
+        f"확률 보정 오차입니다. 현재 경고 기준은 {ece_warn:.3f}입니다.",
+        _metric_tone(metrics.get("ece"), ece_warn, "low_is_good"),
+    )
+with row1[2]:
+    _metric_card(
+        "Best Youden's J",
+        _metric_value(metrics.get("youden_j"), "{:.3f}"),
+        f"민감도·특이도 균형입니다. 최소 기준은 {youden_min:.2f}입니다.",
+        _metric_tone(metrics.get("youden_j"), youden_min, "high_is_good"),
+    )
+with row1[3]:
+    _metric_card(
+        "Shortcut ratio",
+        _metric_value(metrics.get("shortcut_ratio"), "{:.1%}"),
+        f"폐 밖 단서 의존 위험입니다. 경고 기준은 {shortcut_warn:.0%}입니다.",
+        _metric_tone(metrics.get("shortcut_ratio"), shortcut_warn, "low_is_good"),
+    )
+
+row2 = st.columns(4)
+with row2[0]:
+    _metric_card(
+        "View gap",
+        _metric_value(view_gap, "{:.1f}pp"),
+        f"촬영 자세별 성능 차이입니다. 기준은 {domain_gap_warn_pp:.1f}pp입니다.",
+        _metric_tone(view_gap, domain_gap_warn_pp, "low_is_good"),
+    )
+with row2[1]:
+    _metric_card(
+        "Age gap",
+        _metric_value(age_gap, "{:.1f}pp"),
+        f"연령대별 성능 차이입니다. 기준은 {domain_gap_warn_pp:.1f}pp입니다.",
+        _metric_tone(age_gap, domain_gap_warn_pp, "low_is_good"),
+    )
+with row2[2]:
+    _metric_card(
+        "External drop",
+        _metric_value(metrics.get("external_drop_pp"), "{:.1f}pp"),
+        f"외부기관 성능 하락입니다. 차단 기준은 {external_drop_critical_pp:.1f}pp입니다.",
+        _metric_tone(metrics.get("external_drop_pp"), external_drop_critical_pp, "low_is_good"),
+    )
+with row2[3]:
+    hidden_count = metrics.get("hidden_flagged_count", "—")
+    hidden_tone = "warn" if isinstance(hidden_count, (int, float)) and hidden_count > 0 else "good" if hidden_count == 0 else "neutral"
+    _metric_card(
+        "Hidden strata",
+        str(hidden_count),
+        "평균 성능에 가려진 취약 환자군 개수입니다.",
+        hidden_tone,
+    )
 
 st.divider()
 
 left, right = st.columns([1, 1])
 with left:
-    st.subheader("Checkpoint-backed inputs")
+    st.subheader("계산에 사용된 입력 파일")
+    st.markdown(
+        '<p class="section-title-note">각 지표가 어떤 CSV에서 계산되었는지 보여줍니다. 값이 비어 있으면 해당 파일 또는 컬럼이 없다는 뜻입니다.</p>',
+        unsafe_allow_html=True,
+    )
     source_rows = [
-        {"signal": "Calibration ECE", "source": "test_predictions.csv", "value": None if not np.isfinite(metrics.get("ece", float("nan"))) else round(metrics["ece"], 4)},
-        {"signal": "Youden J / threshold", "source": "test_predictions.csv", "value": None if not np.isfinite(metrics.get("youden_j", float("nan"))) else f"J={metrics['youden_j']:.3f}, threshold={metrics['best_threshold']:.3f}"},
-        {"signal": "Subgroup AUROC gap", "source": "view/age/gender_subgroup.csv", "value": None if not np.isfinite(metrics.get("domain_gap_pp", float("nan"))) else f"{metrics['domain_gap_pp']:.1f}pp"},
-        {"signal": "External AUROC drop", "source": "domain_shift.csv", "value": None if not np.isfinite(metrics.get("external_drop_pp", float("nan"))) else f"{metrics['external_drop_pp']:.1f}pp"},
-        {"signal": "Shortcut pattern ratio", "source": "shortcut_regions.csv", "value": None if not np.isfinite(metrics.get("shortcut_ratio", float("nan"))) else f"{metrics['shortcut_ratio']:.1%}"},
-        {"signal": "Hidden stratification", "source": "test_predictions.csv proxy features", "value": metrics.get("hidden_flagged_count", None)},
+        {"지표": "확률 보정 오차(ECE)", "입력 파일": "test_predictions.csv", "계산값": None if not np.isfinite(metrics.get("ece", float("nan"))) else round(metrics["ece"], 4)},
+        {"지표": "운영 임계값 품질(Youden J)", "입력 파일": "test_predictions.csv", "계산값": None if not np.isfinite(metrics.get("youden_j", float("nan"))) else f"J={metrics['youden_j']:.3f}, threshold={metrics['best_threshold']:.3f}"},
+        {"지표": "하위집단 AUROC 격차", "입력 파일": "view/age/gender_subgroup.csv", "계산값": None if not np.isfinite(metrics.get("domain_gap_pp", float("nan"))) else f"{metrics['domain_gap_pp']:.1f}pp"},
+        {"지표": "외부기관 AUROC 하락", "입력 파일": "domain_shift.csv", "계산값": None if not np.isfinite(metrics.get("external_drop_pp", float("nan"))) else f"{metrics['external_drop_pp']:.1f}pp"},
+        {"지표": "Shortcut 위험 비율", "입력 파일": "shortcut_regions.csv", "계산값": None if not np.isfinite(metrics.get("shortcut_ratio", float("nan"))) else f"{metrics['shortcut_ratio']:.1%}"},
+        {"지표": "숨은 취약군 탐색", "입력 파일": "test_predictions.csv proxy features", "계산값": metrics.get("hidden_flagged_count", None)},
     ]
     df_source = pd.DataFrame(source_rows).astype(str)
     st.dataframe(df_source, hide_index=True, width="stretch")
 
 with right:
-    st.subheader("Integrated readiness issues")
+    st.subheader("우선 확인할 문제 항목")
+    st.markdown(
+        '<p class="section-title-note">여기에 항목이 있으면 상단 배치 판단이 WARNING 또는 CRITICAL로 바뀝니다. 권장 조치부터 처리하면 됩니다.</p>',
+        unsafe_allow_html=True,
+    )
     issues_df = pd.DataFrame(report["issues"])
     if issues_df.empty:
-        st.success("No reliability issues under the current thresholds.")
+        st.success("현재 조절 기준에서는 경고 항목이 없습니다.")
     else:
-        st.dataframe(issues_df, hide_index=True, width="stretch")
+        issues_view = issues_df.assign(
+            구분=issues_df["dimension"].map(_issue_dimension_ko),
+            심각도=issues_df["severity"].map(_issue_severity_ko),
+        )[["심각도", "구분", "message", "recommended_action"]].rename(
+            columns={"message": "판단 근거", "recommended_action": "권장 조치"}
+        )
+        st.dataframe(issues_view, hide_index=True, width="stretch")
 
 st.divider()
 
 if disease and not pred_df.empty:
-    st.subheader(f"Calibration and operating point — {disease}")
+    st.subheader(f"확률 보정과 운영 기준선 — {disease}")
+    st.markdown(
+        '<p class="section-title-note">점이 대각선에 가까울수록 모델의 예측 확률과 실제 양성 비율이 잘 맞습니다. 대각선에서 크게 벗어나면 ECE가 커지고, 배치 전 보정이 필요합니다.</p>',
+        unsafe_allow_html=True,
+    )
     y_true = pd.to_numeric(pred_df[f"{disease}_true"], errors="coerce").fillna(0).astype(int).to_numpy()
     y_prob = pd.to_numeric(pred_df[f"{disease}_prob"], errors="coerce").fillna(0.0).clip(0, 1).to_numpy()
     bins = np.linspace(0, 1, 11)
@@ -565,11 +959,15 @@ if disease and not pred_df.empty:
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=cal_df["mean_prob"], y=cal_df["observed_rate"], mode="markers+lines", name="Observed"))
         fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="Perfect calibration", line=dict(dash="dash")))
-        fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Mean predicted probability", yaxis_title="Observed positive rate", xaxis=dict(range=[0, 1]), yaxis=dict(range=[0, 1]))
+        fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="평균 예측 확률", yaxis_title="실제 양성 비율", xaxis=dict(range=[0, 1]), yaxis=dict(range=[0, 1]))
         st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 st.divider()
-st.subheader("Hidden stratification proxy")
+st.subheader("숨은 취약군 탐색")
+st.markdown(
+    '<p class="section-title-note">전체 평균 성능은 좋아도 특정 조건의 환자군에서만 오류가 집중될 수 있습니다. 군집별 오류율과 AUROC를 함께 확인하세요.</p>',
+    unsafe_allow_html=True,
+)
 if hidden_note:
     st.info(hidden_note)
 if hidden_result is not None:
@@ -582,7 +980,7 @@ if hidden_result is not None:
             fig = go.Figure()
             fig.add_trace(go.Bar(x=strata_df["stratum_id"].astype(str), y=strata_df["error_rate"], name="Error rate"))
             fig.add_trace(go.Scatter(x=strata_df["stratum_id"].astype(str), y=strata_df["auroc"], mode="lines+markers", name="AUROC", yaxis="y2"))
-            fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Proxy stratum", yaxis=dict(title="Error rate", range=[0, 1]), yaxis2=dict(title="AUROC", overlaying="y", side="right", range=[0, 1]), legend=dict(orientation="h", y=1.1))
+            fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Proxy stratum", yaxis=dict(title="오류율", range=[0, 1]), yaxis2=dict(title="AUROC", overlaying="y", side="right", range=[0, 1]), legend=dict(orientation="h", y=1.1))
             st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     else:
         st.info("Minimum size 조건을 만족하는 strata가 없습니다.")
@@ -590,8 +988,8 @@ else:
     st.warning("hidden stratification proxy 결과를 계산하지 못했습니다.")
 
 st.divider()
-st.subheader("Raw readiness JSON")
-st.code(json.dumps({"metrics": metrics, "thresholds": thresholds, "report": report}, indent=2, ensure_ascii=False, default=str), language="json")
+with st.expander("개발자용 원본 readiness JSON 보기", expanded=False):
+    st.code(json.dumps({"metrics": metrics, "thresholds": thresholds, "report": report}, indent=2, ensure_ascii=False, default=str), language="json")
 
 st.caption(
     "주의: 실제 ROI heatmap/mask 파일이 없는 현재 프로젝트에서는 ROI energy를 새로 계산하지 않고, "
