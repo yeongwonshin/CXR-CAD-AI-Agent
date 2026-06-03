@@ -695,7 +695,7 @@ st.markdown(
     <h1>Agentic Case Workbench</h1>
     <p>
         기존 CXR-CAD의 학습 완료 모델과 Grad-CAM, 판독문 초안, 의료진 피드백 큐는 그대로 유지하면서,
-        여러 장의 X-ray/DICOM을 한 번에 입력하고 이미지별 결과·검진 초안·피드백·품질 점검·해부학 ROI·비교 요약을 제공하는 케이스 워크벤치입니다.
+        여러 장의 X-ray/DICOM을 한 번에 입력하고 이미지별 결과·검진 초안·피드백·품질 점검·해부학 ROI·비교 요약을 제공하는 agent workbench입니다.
     </p>
     <span class="agent-pill">Multi-image upload</span>
     <span class="agent-pill">DICOM-aware routing</span>
