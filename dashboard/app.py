@@ -895,7 +895,7 @@ else:
                 )
 
             # ── 의료진 피드백 + 재학습 검수 큐 ───────────────────────────
-            st.markdown('<div class="section-title">의료진 피드백 · 재학습 검수 큐</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-title">의료진 피드백 · 모델 재학습용 검수 큐</div>', unsafe_allow_html=True)
             queue_summary = get_feedback_queue_summary(limit=3) if health else None
             queue_count = queue_summary.get("total_count", 0) if queue_summary else 0
             st.markdown(
