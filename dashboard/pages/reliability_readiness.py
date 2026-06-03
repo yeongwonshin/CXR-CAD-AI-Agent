@@ -431,17 +431,101 @@ def _safe_auroc(y_true: np.ndarray, y_prob: np.ndarray) -> float:
         return float("nan")
 
 
-def _shortcut_ratio(region_df: pd.DataFrame) -> float:
-    if region_df.empty or "Count" not in region_df.columns:
-        return float("nan")
-    label_col = region_df.columns[0]
-    df = region_df.copy()
-    df["Count"] = pd.to_numeric(df["Count"], errors="coerce").fillna(0)
-    total = float(df["Count"].sum())
-    if total <= 0:
-        return float("nan")
-    normal = df[df[label_col].astype(str).str.contains("lung|정상", case=False, regex=True, na=False)]["Count"].sum()
-    return float((total - normal) / total)
+def _is_expected_lung_region(values: pd.Series) -> pd.Series:
+    """Return rows whose Grad-CAM peak/energy is in the expected lung field."""
+    text_values = values.astype(str).str.lower()
+    return text_values.str.contains(r"lung|lungs|폐|정상|expected", case=False, regex=True, na=False)
+
+
+def _shortcut_stats(
+    region_df: pd.DataFrame,
+    *,
+    shortcut_summary_df: pd.DataFrame | None = None,
+    shortcut_case_df: pd.DataFrame | None = None,
+    false_positive_df: pd.DataFrame | None = None,
+    false_negative_df: pd.DataFrame | None = None,
+) -> dict[str, Any]:
+    """Compute a less misleading shortcut risk ratio.
+
+    Older checkpoint folders only contain ``shortcut_regions.csv``.  That file is
+    a small Grad-CAM sample distribution, not a full validation-set denominator.
+    If the sampled ViT cases are all ``Markers/Text``, the old logic divided
+    12 by 12 and displayed 100%.  For the readiness badge we normalize the
+    confirmed shortcut count by the available FP/FN error-candidate pool when it
+    exists, while still exposing the raw sampled ratio for transparency.
+    """
+    empty = {
+        "ratio": float("nan"),
+        "shortcut_count": 0,
+        "sampled_count": 0,
+        "denominator": 0,
+        "sample_ratio": float("nan"),
+        "source": "shortcut_regions.csv",
+        "note": "shortcut 집계 파일을 찾지 못했습니다.",
+    }
+
+    # Prefer a summary file produced by the updated Grad-CAM script when present.
+    if shortcut_summary_df is not None and not shortcut_summary_df.empty:
+        row = shortcut_summary_df.iloc[0]
+        for ratio_col in ["Shortcut_Ratio_ErrorCandidates", "shortcut_ratio_error_candidates", "Shortcut Ratio Error Candidates"]:
+            if ratio_col in shortcut_summary_df.columns:
+                ratio = pd.to_numeric(pd.Series([row[ratio_col]]), errors="coerce").iloc[0]
+                if pd.notna(ratio):
+                    shortcut_count = int(pd.to_numeric(pd.Series([row.get("Shortcut_Count", row.get("shortcut_count", 0))]), errors="coerce").fillna(0).iloc[0])
+                    sampled_count = int(pd.to_numeric(pd.Series([row.get("Sampled_Cases", row.get("sampled_cases", 0))]), errors="coerce").fillna(0).iloc[0])
+                    denominator = int(pd.to_numeric(pd.Series([row.get("Error_Candidate_Count", row.get("error_candidate_count", sampled_count))]), errors="coerce").fillna(sampled_count).iloc[0])
+                    sample_ratio = shortcut_count / sampled_count if sampled_count else float("nan")
+                    return {
+                        "ratio": float(ratio),
+                        "shortcut_count": shortcut_count,
+                        "sampled_count": sampled_count,
+                        "denominator": denominator,
+                        "sample_ratio": float(sample_ratio),
+                        "source": "shortcut_summary.csv",
+                        "note": "shortcut_summary.csv의 FP/FN 후보 보정 비율을 사용했습니다.",
+                    }
+
+    if shortcut_case_df is not None and not shortcut_case_df.empty and "Region" in shortcut_case_df.columns:
+        sampled_count = int(len(shortcut_case_df))
+        shortcut_count = int((~_is_expected_lung_region(shortcut_case_df["Region"])).sum())
+    elif not region_df.empty and "Count" in region_df.columns:
+        label_col = next((c for c in region_df.columns if c != "Count"), region_df.columns[0])
+        df = region_df.copy()
+        df["Count"] = pd.to_numeric(df["Count"], errors="coerce").fillna(0)
+        sampled_count = int(df["Count"].sum())
+        expected_count = int(df.loc[_is_expected_lung_region(df[label_col]), "Count"].sum())
+        shortcut_count = max(sampled_count - expected_count, 0)
+    else:
+        return empty
+
+    if sampled_count <= 0:
+        return empty
+
+    fp_rows = 0 if false_positive_df is None or false_positive_df.empty else len(false_positive_df)
+    fn_rows = 0 if false_negative_df is None or false_negative_df.empty else len(false_negative_df)
+    error_candidate_count = int(fp_rows + fn_rows)
+    denominator = error_candidate_count if error_candidate_count >= sampled_count else sampled_count
+    ratio = shortcut_count / denominator if denominator else float("nan")
+    sample_ratio = shortcut_count / sampled_count if sampled_count else float("nan")
+
+    if denominator != sampled_count:
+        note = (
+            f"기존 shortcut_regions.csv는 Grad-CAM 샘플 {sampled_count}건만 집계합니다. "
+            f"따라서 화면의 Shortcut ratio는 확인된 shortcut {shortcut_count}건을 FP/FN 후보 {denominator}건으로 보정해 표시하고, "
+            f"샘플 내부 비율은 {sample_ratio:.1%}입니다."
+        )
+    else:
+        note = f"FP/FN 후보 전체 분모가 없어 Grad-CAM 샘플 {sampled_count}건 기준으로 계산했습니다."
+
+    return {
+        "ratio": float(ratio),
+        "shortcut_count": int(shortcut_count),
+        "sampled_count": int(sampled_count),
+        "denominator": int(denominator),
+        "sample_ratio": float(sample_ratio),
+        "source": "shortcut_regions.csv" if shortcut_case_df is None or shortcut_case_df.empty else "shortcut_cases.csv",
+        "note": note,
+    }
 
 
 def _external_drop_pp(ext_df: pd.DataFrame) -> float:
@@ -696,7 +780,7 @@ def _render_term_expander() -> None:
         <tr><td>Specificity</td><td>실제 정상/음성인 경우를 음성으로 잘 걸러내는 비율입니다. 높을수록 불필요한 알림이 줄어듭니다.</td><td>검수 부담이 큰 운영 환경에서는 특이도도 함께 봐야 합니다.</td></tr>
         <tr><td>Subgroup gap</td><td>나이, 성별, 촬영 자세 같은 하위집단 사이의 AUROC 차이입니다. 작을수록 특정 집단에 덜 치우칩니다.</td><td>Subgroup gap warning threshold를 낮추면 하위집단 불균형에 더 민감하게 경고합니다.</td></tr>
         <tr><td>External drop</td><td>다른 병원/외부 데이터에서 성능이 얼마나 떨어지는지 보는 값입니다.</td><td>External drop critical threshold를 낮추면 외부기관 일반화 실패를 더 강하게 차단합니다.</td></tr>
-        <tr><td>Shortcut ratio</td><td>폐 병변 대신 마커, 테두리, 문자, 기기 흔적 같은 엉뚱한 단서에 의존할 위험 신호입니다.</td><td>Shortcut ratio warning threshold를 낮추면 Grad-CAM/ROI 검증을 더 엄격하게 요구합니다.</td></tr>
+        <tr><td>Shortcut ratio</td><td>폐 병변 대신 마커, 테두리, 문자, 기기 흔적 같은 엉뚱한 단서에 의존할 위험 신호입니다. 이 화면에서는 확인된 shortcut 건수를 FP/FN 오류 후보 분모로 보정해 표시합니다.</td><td>Shortcut ratio warning threshold를 낮추면 Grad-CAM/ROI 검증을 더 엄격하게 요구합니다.</td></tr>
         <tr><td>Hidden stratification</td><td>전체 평균은 좋아도 특정 숨은 환자군에서만 성능이 나쁜지 찾는 검사입니다.</td><td>Cluster count를 늘리면 더 세분화해서 찾고, Minimum stratum size를 높이면 너무 작은 군집을 무시합니다.</td></tr>
         <tr><td>pp</td><td>percentage point의 약자입니다. 예: 90%에서 87%로 떨어지면 3pp 하락입니다.</td><td>AUROC gap/drop 같은 차이를 읽을 때 쓰는 단위입니다.</td></tr>
     </tbody>
@@ -726,6 +810,10 @@ age_df = _load_csv("age_subgroup.csv")
 view_df = _load_csv("view_subgroup.csv")
 ext_df = _load_csv("domain_shift.csv")
 region_df = _load_csv("shortcut_regions.csv")
+shortcut_summary_df = _load_csv("shortcut_summary.csv")
+shortcut_case_df = _load_csv("shortcut_cases.csv")
+false_positive_df = _load_csv("false_positive.csv")
+false_negative_df = _load_csv("false_negative.csv")
 pred_df = _load_csv("test_predictions.csv")
 
 true_cols = sorted([c[:-5] for c in pred_df.columns if c.endswith("_true")]) if not pred_df.empty else []
@@ -753,6 +841,10 @@ with st.sidebar:
         ("gender_subgroup.csv", gender_df),
         ("domain_shift.csv", ext_df),
         ("shortcut_regions.csv", region_df),
+        ("shortcut_summary.csv", shortcut_summary_df),
+        ("shortcut_cases.csv", shortcut_case_df),
+        ("false_positive.csv", false_positive_df),
+        ("false_negative.csv", false_negative_df),
     ] if not df.empty]
     st.caption("Loaded: " + (", ".join(loaded) if loaded else "none"))
 
@@ -813,7 +905,20 @@ gender_gap = _gender_gap_pp(gender_df)
 finite_gaps = [x for x in [view_gap, age_gap, gender_gap] if np.isfinite(x)]
 metrics["domain_gap_pp"] = max(finite_gaps) if finite_gaps else float("nan")
 metrics["external_drop_pp"] = _external_drop_pp(ext_df)
-metrics["shortcut_ratio"] = _shortcut_ratio(region_df)
+shortcut_stats = _shortcut_stats(
+    region_df,
+    shortcut_summary_df=shortcut_summary_df,
+    shortcut_case_df=shortcut_case_df,
+    false_positive_df=false_positive_df,
+    false_negative_df=false_negative_df,
+)
+metrics["shortcut_ratio"] = shortcut_stats["ratio"]
+metrics["shortcut_count"] = shortcut_stats["shortcut_count"]
+metrics["shortcut_sampled_count"] = shortcut_stats["sampled_count"]
+metrics["shortcut_denominator"] = shortcut_stats["denominator"]
+metrics["shortcut_sample_ratio"] = shortcut_stats["sample_ratio"]
+metrics["shortcut_source"] = shortcut_stats["source"]
+metrics["shortcut_note"] = shortcut_stats["note"]
 
 thresholds = {
     "ece_warn": ece_warn,
@@ -863,9 +968,12 @@ with row1[3]:
     _metric_card(
         "Shortcut ratio",
         _metric_value(metrics.get("shortcut_ratio"), "{:.1%}"),
-        f"폐 밖 단서 의존 위험입니다. 경고 기준은 {shortcut_warn:.0%}입니다.",
+        f"확인된 폐 밖 단서 {metrics.get('shortcut_count', 0)}건 / 기준 분모 {metrics.get('shortcut_denominator', 0)}건입니다. 경고 기준은 {shortcut_warn:.0%}입니다.",
         _metric_tone(metrics.get("shortcut_ratio"), shortcut_warn, "low_is_good"),
     )
+
+if metrics.get("shortcut_note"):
+    st.info(metrics["shortcut_note"])
 
 row2 = st.columns(4)
 with row2[0]:
@@ -913,7 +1021,7 @@ with left:
         {"지표": "운영 임계값 품질(Youden J)", "입력 파일": "test_predictions.csv", "계산값": None if not np.isfinite(metrics.get("youden_j", float("nan"))) else f"J={metrics['youden_j']:.3f}, threshold={metrics['best_threshold']:.3f}"},
         {"지표": "하위집단 AUROC 격차", "입력 파일": "view/age/gender_subgroup.csv", "계산값": None if not np.isfinite(metrics.get("domain_gap_pp", float("nan"))) else f"{metrics['domain_gap_pp']:.1f}pp"},
         {"지표": "외부기관 AUROC 하락", "입력 파일": "domain_shift.csv", "계산값": None if not np.isfinite(metrics.get("external_drop_pp", float("nan"))) else f"{metrics['external_drop_pp']:.1f}pp"},
-        {"지표": "Shortcut 위험 비율", "입력 파일": "shortcut_regions.csv", "계산값": None if not np.isfinite(metrics.get("shortcut_ratio", float("nan"))) else f"{metrics['shortcut_ratio']:.1%}"},
+        {"지표": "Shortcut 위험 비율", "입력 파일": metrics.get("shortcut_source", "shortcut_regions.csv"), "계산값": None if not np.isfinite(metrics.get("shortcut_ratio", float("nan"))) else f"{metrics['shortcut_ratio']:.1%} ({metrics.get('shortcut_count', 0)}/{metrics.get('shortcut_denominator', 0)}), 샘플 내부 {metrics.get('shortcut_sample_ratio', float('nan')):.1%}"},
         {"지표": "숨은 취약군 탐색", "입력 파일": "test_predictions.csv proxy features", "계산값": metrics.get("hidden_flagged_count", None)},
     ]
     df_source = pd.DataFrame(source_rows).astype(str)
@@ -992,6 +1100,6 @@ with st.expander("개발자용 원본 readiness JSON 보기", expanded=False):
 
 st.caption(
     "주의: 실제 ROI heatmap/mask 파일이 없는 현재 프로젝트에서는 ROI energy를 새로 계산하지 않고, "
-    "shortcut_regions.csv의 폐 영역 이탈 집계를 localization 위험 신호로 사용합니다. "
+    "shortcut_summary.csv가 있으면 보정된 집계를, 없으면 shortcut_regions.csv와 FP/FN 후보 수를 함께 사용해 localization 위험 신호를 계산합니다. "
     "추후 Grad-CAM heatmap과 lung/lesion ROI mask를 저장하면 ROI consistency를 완전 자동화할 수 있습니다."
 )
