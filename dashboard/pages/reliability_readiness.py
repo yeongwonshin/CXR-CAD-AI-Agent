@@ -962,7 +962,7 @@ if disease and not pred_df.empty:
         st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 st.divider()
-st.subheader("숨은 취약군 탐색")
+st.subheader("숨은 취약군(hidden stratification) 탐색")
 st.markdown(
     '<p class="section-title-note">전체 평균 성능은 좋아도 특정 조건의 환자군에서만 오류가 집중될 수 있습니다. 군집별 오류율과 AUROC를 함께 확인하세요.</p>',
     unsafe_allow_html=True,
