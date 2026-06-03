@@ -833,7 +833,7 @@ _render_judgment_basis(report, metrics, thresholds)
 
 st.subheader("핵심 지표 한눈에 보기")
 st.markdown(
-    '<p class="section-title-note">색이 진한 카드는 현재 기준에서 먼저 확인해야 하는 항목입니다. 숫자만 보지 말고 카드 하단의 해석을 함께 확인하세요.</p>',
+    '<p class="section-title-note">숫자만 보지 말고 카드 하단의 해석을 함께 확인하세요.</p>',
     unsafe_allow_html=True,
 )
 
