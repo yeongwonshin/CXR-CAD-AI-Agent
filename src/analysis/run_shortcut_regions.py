@@ -81,6 +81,23 @@ def _case_disease(row: pd.Series, error_type: str) -> str | None:
     return None
 
 
+def _is_shortcut_region(region: str) -> bool:
+    return "lung" not in str(region).lower()
+
+
+def _count_error_candidates(model_dir: Path) -> int:
+    total = 0
+    for filename in ["false_positive.csv", "false_negative.csv"]:
+        path = model_dir / filename
+        if not path.exists():
+            continue
+        try:
+            total += len(pd.read_csv(path))
+        except Exception:
+            continue
+    return total
+
+
 def _load_cases(model_dir: Path, max_per_type: int) -> pd.DataFrame:
     frames = []
     for filename, error_type in [("false_positive.csv", "FP"), ("false_negative.csv", "FN")]:
@@ -153,6 +170,23 @@ def analyze_model(
         .sort_values("Count", ascending=False)
     )
     shortcut_df.to_csv(model_dir / "shortcut_regions.csv", index=False)
+
+    sampled_cases = int(len(detail_df))
+    shortcut_count = int(detail_df["Region"].map(_is_shortcut_region).sum()) if sampled_cases else 0
+    error_candidate_count = _count_error_candidates(model_dir)
+    denominator = error_candidate_count if error_candidate_count >= sampled_cases else sampled_cases
+    summary_df = pd.DataFrame([
+        {
+            "Model": model_key,
+            "Sampled_Cases": sampled_cases,
+            "Shortcut_Count": shortcut_count,
+            "Error_Candidate_Count": denominator,
+            "Shortcut_Ratio_Sampled": shortcut_count / sampled_cases if sampled_cases else np.nan,
+            "Shortcut_Ratio_ErrorCandidates": shortcut_count / denominator if denominator else np.nan,
+            "Note": "Ratio for readiness dashboard uses Shortcut_Count / Error_Candidate_Count to avoid treating the small sampled region distribution as the full denominator.",
+        }
+    ])
+    summary_df.to_csv(model_dir / "shortcut_summary.csv", index=False)
     return shortcut_df
 
 
