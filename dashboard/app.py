@@ -882,7 +882,7 @@ else:
                 help="의료진이 실제 판독문에 맞게 수정한 뒤 복사하거나 피드백 큐에 함께 저장할 수 있습니다.",
             )
             st.download_button(
-                "판독문 초안 TXT 다운로드",
+                "판독문 초안 (.txt) 다운로드",
                 data=edited_report.encode("utf-8"),
                 file_name=f"{case_id}_ai_report_draft.txt",
                 mime="text/plain",
