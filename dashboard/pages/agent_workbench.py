@@ -619,7 +619,7 @@ def render_agent_chat(result: dict) -> None:
     st.markdown(
         """
 <div class="agent-card">
-    <h3>MedRAX-style LLM chat</h3>
+    <h3>AI Agent</h3>
     <p>업로드한 여러 영상의 분석 결과를 기존 CXR-CAD 도구 출력으로 묶고, 백엔드 LLM Agent가 그 컨텍스트 위에서 계속 답변합니다. 대화 UI와 이미지별 판독·피드백 기능은 그대로 유지됩니다.</p>
 </div>
 """,
