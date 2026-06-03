@@ -697,7 +697,7 @@ def _render_term_expander() -> None:
         <tr><td>Subgroup gap</td><td>나이, 성별, 촬영 자세 같은 하위집단 사이의 AUROC 차이입니다. 작을수록 특정 집단에 덜 치우칩니다.</td><td>Subgroup gap warning threshold를 낮추면 하위집단 불균형에 더 민감하게 경고합니다.</td></tr>
         <tr><td>External drop</td><td>다른 병원/외부 데이터에서 성능이 얼마나 떨어지는지 보는 값입니다.</td><td>External drop critical threshold를 낮추면 외부기관 일반화 실패를 더 강하게 차단합니다.</td></tr>
         <tr><td>Shortcut ratio</td><td>폐 병변 대신 마커, 테두리, 문자, 기기 흔적 같은 엉뚱한 단서에 의존할 위험 신호입니다.</td><td>Shortcut ratio warning threshold를 낮추면 Grad-CAM/ROI 검증을 더 엄격하게 요구합니다.</td></tr>
-        <tr><td>Hidden strata</td><td>전체 평균은 좋아도 특정 숨은 환자군에서만 성능이 나쁜지 찾는 검사입니다.</td><td>Cluster count를 늘리면 더 세분화해서 찾고, Minimum stratum size를 높이면 너무 작은 군집을 무시합니다.</td></tr>
+        <tr><td>Hidden stratification</td><td>전체 평균은 좋아도 특정 숨은 환자군에서만 성능이 나쁜지 찾는 검사입니다.</td><td>Cluster count를 늘리면 더 세분화해서 찾고, Minimum stratum size를 높이면 너무 작은 군집을 무시합니다.</td></tr>
         <tr><td>pp</td><td>percentage point의 약자입니다. 예: 90%에서 87%로 떨어지면 3pp 하락입니다.</td><td>AUROC gap/drop 같은 차이를 읽을 때 쓰는 단위입니다.</td></tr>
     </tbody>
 </table>
