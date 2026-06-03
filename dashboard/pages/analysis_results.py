@@ -20,7 +20,10 @@ import streamlit as st
 from services.llm_analysis import (
     ask_metric_question,
     generate_metric_summary,
+    get_configured_api_key,
+    get_configured_model,
     langchain_is_ready,
+    load_project_env,
 )
 
 
@@ -209,8 +212,10 @@ st.markdown(
 
 
 # ── 상수 ──────────────────────────────────────────────────────────────────────
+load_project_env()
+
 BASE_CHECKPOINT_DIR = Path(os.environ.get("CHECKPOINT_DIR", "checkpoints"))
-DEFAULT_LLM_MODEL  = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+DEFAULT_LLM_MODEL  = get_configured_model("gpt-4o-mini")
 
 SUPPORTED_MODELS = {
     "densenet":    "DenseNet-121",
@@ -253,6 +258,9 @@ def load_model_data(checkpoint_dir: Path) -> dict:
 
 
 # ── 모델 선택 (session_state 기반, 사이드바보다 먼저 실행) ────────────────────
+if "analysis_llm_enabled" not in st.session_state:
+    st.session_state["analysis_llm_enabled"] = True
+
 _selected_model = st.session_state.get("analysis_selected_model", "densenet")
 CHECKPOINT_DIR = BASE_CHECKPOINT_DIR / _selected_model
 _data = load_model_data(CHECKPOINT_DIR)
@@ -531,8 +539,15 @@ def heuristic_summary(metric_key: str) -> str:
 def render_llm_section(metric_key: str, metric_title: str, metric_context: str) -> None:
     st.markdown('<div class="section-header">LLM 결론 및 자료 해석</div>', unsafe_allow_html=True)
 
-    api_key = st.session_state.get("analysis_openai_api_key", "").strip()
-    model_name = st.session_state.get("analysis_openai_model", DEFAULT_LLM_MODEL).strip() or DEFAULT_LLM_MODEL
+    if not st.session_state.get("analysis_llm_enabled", True):
+        st.info("사이드바에서 LLM 사용이 꺼져 있어 이 화면은 규칙 기반 고속 해석만 표시합니다. 지표를 1→2→3으로 이동해도 이 설정은 유지됩니다.")
+        st.markdown('<div class="llm-box">', unsafe_allow_html=True)
+        st.markdown("### 고속 해석\n" + heuristic_summary(metric_key))
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
+    api_key = get_configured_api_key()
+    model_name = get_configured_model(DEFAULT_LLM_MODEL)
     ready, import_error = langchain_is_ready()
 
     summary_cache = st.session_state.setdefault("analysis_llm_summary_cache", {})
@@ -542,7 +557,7 @@ def render_llm_section(metric_key: str, metric_title: str, metric_context: str) 
     if ready and api_key:
         if cache_key not in summary_cache:
             with summary_slot:
-                with st.spinner("LLM이 현재 지표를 분석 중입니다..."):
+                with st.spinner("LLM이 압축 지표 컨텍스트로 빠르게 분석 중입니다..."):
                     try:
                         summary_cache[cache_key] = generate_metric_summary(
                             metric_title=metric_title,
@@ -563,7 +578,7 @@ def render_llm_section(metric_key: str, metric_title: str, metric_context: str) 
             if not ready:
                 st.info(f"LangChain/OpenAI 패키지가 아직 설치되지 않았습니다: {import_error}")
             elif not api_key:
-                st.info("사이드바에 OpenAI API Key를 넣으면 LLM 해석이 자동 생성됩니다.")
+                st.info("프로젝트 루트의 .env에 OPENAI_API_KEY를 설정하면 LLM 해석이 자동 생성됩니다.")
             st.markdown('<div class="llm-box">', unsafe_allow_html=True)
             st.markdown("### 임시 해석\n" + heuristic_summary(metric_key))
             st.markdown('</div>', unsafe_allow_html=True)
@@ -584,7 +599,7 @@ def render_llm_section(metric_key: str, metric_title: str, metric_context: str) 
         elif not ready:
             st.warning("질문 응답을 사용하려면 LangChain/OpenAI 패키지 설치가 필요합니다.")
         elif not api_key:
-            st.warning("질문 응답을 사용하려면 사이드바에 OpenAI API Key를 입력해 주세요.")
+            st.warning("질문 응답을 사용하려면 프로젝트 루트의 .env에 OPENAI_API_KEY를 설정해 주세요.")
         else:
             with st.spinner("LLM이 질문에 답하는 중입니다..."):
                 try:
@@ -861,31 +876,31 @@ with st.sidebar:
     )
 
     st.divider()
-    st.markdown("### LLM 설정")
-    st.text_input(
-        "OpenAI API Key",
-        key="analysis_openai_api_key",
-        type="password",
-        value=st.session_state.get("analysis_openai_api_key") or os.environ.get("OPENAI_API_KEY", ""),
-        help="analysis 화면에서만 사용됩니다.",
-    )
-    st.text_input(
-        "LLM 모델명",
-        key="analysis_openai_model",
-        value=st.session_state.get("analysis_openai_model") or DEFAULT_LLM_MODEL,
-        help="예: gpt-4.1-mini",
+    st.markdown("### LLM 사용")
+    st.toggle(
+        "Result Analysis에서 LLM 사용",
+        key="analysis_llm_enabled",
+        help="끄면 지표 화면을 1→2→3으로 이동해도 LLM 호출이 다시 발생하지 않고, 이 토글 상태도 유지됩니다.",
     )
 
-    ready, import_error = langchain_is_ready()
-    if ready:
-        st.success("LangChain 의존성이 감지되었습니다.")
+    if st.session_state.get("analysis_llm_enabled", True):
+        ready, import_error = langchain_is_ready()
+        configured_key = bool(get_configured_api_key())
+        configured_model = get_configured_model(DEFAULT_LLM_MODEL)
+        if ready and configured_key:
+            st.success(f".env 기반 LLM 설정 감지됨 · 모델: {configured_model}")
+            st.caption("고속 모드: LangChain 없이 OpenAI-compatible 직접 호출")
+        elif ready:
+            st.info(".env의 OPENAI_API_KEY가 비어 있습니다. LLM 대신 규칙 기반 해석이 표시됩니다.")
+        else:
+            st.warning(f"LLM 클라이언트 준비 실패: {import_error}")
     else:
-        st.warning(f"LangChain 의존성이 없습니다: {import_error}")
+        st.info("LLM OFF · 지표 전환 시 LLM 재호출 없음")
 
     st.divider()
     st.markdown(
         "<div style='text-align:center;opacity:0.45;font-size:0.72rem;'>"
-        "CXR-CAD v0.3.0<br>Analysis + LLM Insights"
+        "CXR-CAD v0.3.1<br>Fast Analysis + Optional LLM"
         "</div>",
         unsafe_allow_html=True,
     )
