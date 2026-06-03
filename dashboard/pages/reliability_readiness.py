@@ -860,7 +860,7 @@ with st.sidebar:
     youden_min = st.slider("최소 Youden's J", 0.00, 1.00, 0.60, 0.01, help="민감도와 특이도를 함께 보는 운영 임계값 품질입니다. 이 값보다 낮으면 경고로 봅니다.")
     domain_gap_warn_pp = st.slider("하위집단 격차 경고 기준 (pp)", 0.0, 15.0, 3.0, 0.5, help="나이/성별/촬영자세 집단 사이 AUROC 차이입니다. 이 값 이상이면 경고로 봅니다.")
     external_drop_critical_pp = st.slider("외부기관 성능 하락 차단 기준 (pp)", 0.0, 20.0, 3.0, 0.5, help="외부 데이터에서 AUROC가 이 값 이상 떨어지면 CRITICAL로 봅니다.")
-    shortcut_warn = st.slider("Shortcut 비율 경고 기준", 0.00, 0.50, 0.05, 0.01, help="폐 영역 밖 단서에 의존할 위험 비율입니다. 이 값 이상이면 경고로 봅니다.")
+    shortcut_warn = st.slider("Shortcut 비율 경고 기준", 0.00, 1.00, 0.5, 0.1, help="폐 영역 밖 단서에 의존할 위험 비율입니다. 이 값 이상이면 경고로 봅니다.")
 
     st.markdown("### 숨은 취약군 탐색")
     n_clusters = st.slider("군집 개수", 2, 8, 4, 1, help="더 크게 잡으면 환자군을 더 세분화해 숨은 취약군을 찾습니다.")
