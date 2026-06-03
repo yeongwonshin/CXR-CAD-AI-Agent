@@ -1,7 +1,7 @@
-"""🧠 Agentic Case Workbench — MedRAX-style multi-image CXR workflow.
+""" Agentic Case Workbench — MedRAX-style multi-image CXR workflow.
 
 기존 CXR-CAD 모델 학습 결과를 그대로 사용하면서, 플랫폼 레벨에서
-MedRAX의 강점인 multi-image 입력, tool trace, DICOM 처리, 케이스 비교,
+MedRAX의 강점인 multi-image 입력, 대화형 agent, DICOM 처리, 케이스 비교,
 이미지별 판독문 초안/의료진 피드백을 제공하는 Streamlit 페이지입니다.
 """
 
@@ -110,8 +110,20 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .triage.normal { background:linear-gradient(135deg,#ecfeff,#eff6ff); border-color:rgba(14,165,233,0.35); }
 .triage.demo { background:linear-gradient(135deg,#eef2ff,#f5f3ff); border-color:rgba(124,58,237,0.35); }
 .disease-tag { display:inline-flex; margin:0.18rem; padding:0.32rem 0.62rem; border-radius:999px; background:linear-gradient(135deg,#dbeafe,#ccfbf1); color:#0f172a !important; font-size:0.77rem; font-weight:850; border:1px solid rgba(14,165,233,0.22); }
-.trace-step { border-left:4px solid #0ea5e9; padding:0.55rem 0.75rem; margin:0.35rem 0; background:rgba(239,246,255,0.9); border-radius:0 14px 14px 0; }
-.trace-step b { color:#0f172a !important; }
+.chat-panel {
+    border-radius: 24px; padding: 1.05rem; min-height: 300px; max-height: 520px; overflow-y: auto;
+    background: radial-gradient(circle at 18% 12%, rgba(37,99,235,0.10), transparent 30%), linear-gradient(180deg,#f8fbff,#eef6ff);
+    border:1px solid rgba(125,211,252,0.34); box-shadow: inset 0 1px 0 rgba(255,255,255,0.75), 0 18px 42px rgba(15,23,42,0.07);
+}
+.chat-row { display:flex; width:100%; margin:0.56rem 0; }
+.chat-row.user { justify-content:flex-end; }
+.chat-row.agent { justify-content:flex-start; }
+.chat-bubble { max-width: 86%; border-radius: 18px; padding:0.82rem 0.95rem; box-shadow:0 12px 28px rgba(15,23,42,0.10); }
+.chat-bubble.user { color:white !important; background:linear-gradient(135deg,#2563eb,#0f766e); border:1px solid rgba(255,255,255,0.24); border-bottom-right-radius:6px; }
+.chat-bubble.agent { color:#0f172a !important; background:rgba(255,255,255,0.96); border:1px solid rgba(148,163,184,0.30); border-bottom-left-radius:6px; }
+.chat-role { font-size:0.68rem; font-weight:900; letter-spacing:0.08em; text-transform:uppercase; opacity:0.76; margin-bottom:0.35rem; }
+.chat-body { font-size:0.89rem; line-height:1.58; white-space:pre-wrap; }
+.chat-hint { border-radius:18px; padding:0.8rem 0.95rem; background:rgba(219,234,254,0.78); border:1px solid rgba(96,165,250,0.25); color:#1e293b !important; font-size:0.82rem; line-height:1.48; }
 .small-muted { color:#64748b !important; font-size:0.78rem; line-height:1.45; }
 </style>
 """,
@@ -245,6 +257,256 @@ def safe_preview_image(uploaded_lookup: Dict[str, bytes], filename: str) -> Imag
         return None
 
 
+def _pct(value: Any) -> str:
+    try:
+        return f"{float(value):.1%}"
+    except Exception:
+        return "-"
+
+
+def _label_kr(label: str | None) -> str:
+    if not label:
+        return "-"
+    return DISEASE_LABELS_KR.get(str(label), str(label).replace("_", " "))
+
+
+def _case_name(case: dict, idx: int) -> str:
+    filename = case.get("filename") or f"case_{idx + 1}"
+    return f"{idx + 1}번 영상({filename})"
+
+
+def _top_case_lines(result: dict, limit: int = 4) -> List[str]:
+    cases = result.get("cases", []) or []
+    ranked = sorted(
+        enumerate(cases),
+        key=lambda item: float(item[1].get("top_probability") or 0.0),
+        reverse=True,
+    )
+    lines: List[str] = []
+    for idx, case in ranked[:limit]:
+        triage = ((case.get("agent_profile") or {}).get("triage_assessment") or {})
+        lines.append(
+            f"- {_case_name(case, idx)}: {_label_kr(case.get('top_disease'))} {_pct(case.get('top_probability'))} · "
+            f"{triage.get('triage_label_kr', '우선도 확인 필요')}"
+        )
+    return lines
+
+
+def _mentioned_diseases(question: str) -> List[str]:
+    q = question.lower()
+    found: List[str] = []
+    for label, label_kr in DISEASE_LABELS_KR.items():
+        if label.lower() in q or label_kr.lower() in q:
+            found.append(label)
+    return found
+
+
+def _disease_specific_reply(result: dict, labels: List[str]) -> str:
+    cases = result.get("cases", []) or []
+    if not cases:
+        return "아직 분석된 영상이 없어 질환별 답변을 만들 수 없습니다."
+    blocks = ["질문에서 언급된 소견을 영상별로 확인했습니다."]
+    for label in labels:
+        rows = []
+        for idx, case in enumerate(cases):
+            probs = case.get("probabilities", {}) or {}
+            rows.append((idx, case, float(probs.get(label, 0.0))))
+        rows.sort(key=lambda item: item[2], reverse=True)
+        blocks.append(f"\n{_label_kr(label)} 기준:")
+        for idx, case, prob in rows[:5]:
+            blocks.append(f"- {_case_name(case, idx)}: {prob:.1%}")
+    blocks.append("\n확률이 높게 나온 영상은 Grad-CAM과 이미지별 판독문 초안을 함께 확인하고, 최종 판단은 의료진 검토로 확정하는 흐름이 안전합니다.")
+    return "\n".join(blocks)
+
+
+def _comparison_reply(result: dict) -> str:
+    summary = result.get("agent_summary", {}) or {}
+    comparison = summary.get("comparison") or {}
+    if not comparison.get("enabled"):
+        return "현재 분석 묶음에는 비교 가능한 영상이 2장 이상 없거나 비교 결과가 생성되지 않았습니다. 여러 장을 업로드하면 첫 영상과 마지막 영상의 확률 변화량을 기준으로 악화·호전 후보를 정리합니다."
+    lines = [comparison.get("summary", "영상 간 변화 비교 결과입니다.")]
+    deltas = comparison.get("probability_deltas", []) or []
+    if deltas:
+        lines.append("\n변화량이 큰 항목:")
+        for item in deltas[:6]:
+            label = item.get("label_kr") or _label_kr(item.get("label"))
+            first_p = _pct(item.get("first_probability"))
+            last_p = _pct(item.get("last_probability"))
+            delta = float(item.get("delta") or 0.0)
+            direction = "증가" if delta > 0 else "감소" if delta < 0 else "변화 없음"
+            lines.append(f"- {label}: {first_p} → {last_p} ({direction} {abs(delta):.1%}p)")
+    lines.append("\n동일 환자의 시간축 비교라면 촬영 조건과 자세 차이도 함께 확인해야 합니다.")
+    return "\n".join(lines)
+
+
+def _triage_reply(result: dict) -> str:
+    lines = ["우선 검토가 필요한 영상부터 정리했습니다."]
+    case_lines = _top_case_lines(result, limit=6)
+    lines.extend(case_lines or ["- 분석된 케이스가 없습니다."])
+    lines.append("\n특히 기흉, 폐부종, 폐렴, 흉수, 심비대 관련 확률이 높거나 Grad-CAM 위치가 임상 소견과 맞는 경우 우선 검토 대상으로 두는 것이 좋습니다.")
+    return "\n".join(lines)
+
+
+def _quality_reply(result: dict) -> str:
+    cases = result.get("cases", []) or []
+    lines = ["영상 품질 점검 결과입니다."]
+    for idx, case in enumerate(cases):
+        quality = (((case.get("agent_profile") or {}).get("quality_check")) or {})
+        flags = quality.get("flags") or []
+        flag_text = "; ".join(str(x) for x in flags[:3]) if flags else "특이 품질 경고 없음"
+        lines.append(
+            f"- {_case_name(case, idx)}: {quality.get('quality_grade', '-')} · "
+            f"{quality.get('quality_score', '-')}/100 · {flag_text}"
+        )
+    lines.append("\n품질 등급이 낮은 영상은 모델 확률과 Grad-CAM을 단독 근거로 쓰지 말고 재촬영 여부 또는 판독 보수성을 함께 검토하세요.")
+    return "\n".join(lines)
+
+
+def _roi_reply(result: dict) -> str:
+    cases = result.get("cases", []) or []
+    lines = ["해부학 ROI 검토 포인트입니다. 이 ROI는 새 segmentation 학습 결과가 아니라 기존 예측과 표준 해부학 위치를 연결한 검토용 스캐폴드입니다."]
+    for idx, case in enumerate(cases):
+        anatomy = (((case.get("agent_profile") or {}).get("anatomy_assessment")) or {})
+        rois = anatomy.get("focus_rois") or []
+        if not rois:
+            lines.append(f"- {_case_name(case, idx)}: ROI 후보 없음")
+            continue
+        roi_text = ", ".join(f"{r.get('label_kr')}({float(r.get('priority_score', 0.0)):.0%})" for r in rois[:4])
+        lines.append(f"- {_case_name(case, idx)}: {roi_text}")
+    return "\n".join(lines)
+
+
+def _report_reply(result: dict) -> str:
+    cases = result.get("cases", []) or []
+    lines = ["이미지별 판독문 초안은 아래 탭의 편집창에서 각각 수정·다운로드할 수 있습니다. 핵심 초안 요약은 다음과 같습니다."]
+    for idx, case in enumerate(cases[:4]):
+        draft = str(case.get("report_draft") or "").strip().replace("\n", " ")
+        if len(draft) > 260:
+            draft = draft[:260].rstrip() + "..."
+        lines.append(f"\n{_case_name(case, idx)}\n- {draft or '초안 없음'}")
+    return "\n".join(lines)
+
+
+def _gradcam_reply(result: dict) -> str:
+    cases = result.get("cases", []) or []
+    lines = ["Grad-CAM 표시 가능 여부입니다."]
+    for idx, case in enumerate(cases):
+        pred = case.get("prediction", {}) or {}
+        has_cam = bool(pred.get("GradCAM_Base64") and len(str(pred.get("GradCAM_Base64"))) > 500)
+        lines.append(f"- {_case_name(case, idx)}: {'Grad-CAM 표시 가능' if has_cam else 'Grad-CAM 없음 또는 Placeholder 응답'}")
+    lines.append("\nGrad-CAM은 기존 CXR-CAD 기능을 그대로 사용하며, 이미지별 탭의 원본 이미지 아래에서 확인할 수 있습니다.")
+    return "\n".join(lines)
+
+
+def build_agent_reply(question: str, result: dict) -> str:
+    question = (question or "").strip()
+    q = question.lower()
+    mentioned = _mentioned_diseases(question)
+    if mentioned:
+        return _disease_specific_reply(result, mentioned)
+    if any(k in q for k in ["비교", "변화", "악화", "호전", "이전", "마지막", "첫", "compare", "change", "worse", "better"]):
+        return _comparison_reply(result)
+    if any(k in q for k in ["품질", "화질", "선명", "흐림", "quality", "재촬영"]):
+        return _quality_reply(result)
+    if any(k in q for k in ["roi", "해부학", "위치", "폐야", "심장", "종격동", "늑골", "어디", "location"]):
+        return _roi_reply(result)
+    if any(k in q for k in ["grad", "cam", "히트맵", "heatmap", "근거"]):
+        return _gradcam_reply(result)
+    if any(k in q for k in ["판독", "초안", "소견", "리포트", "보고서", "report", "draft"]):
+        return _report_reply(result)
+    if any(k in q for k in ["우선", "응급", "위험", "급", "triage", "먼저", "priority"]):
+        return _triage_reply(result)
+
+    summary = result.get("agent_summary", {}) or {}
+    lines = [summary.get("narrative") or "분석 결과를 기준으로 답변합니다."]
+    lines.append("\n핵심 우선순위:")
+    lines.extend(_top_case_lines(result, limit=4) or ["- 분석된 케이스가 없습니다."])
+    lines.append("\n추가로 '비교해줘', '폐렴만 정리해줘', '품질 문제 있어?', 'Grad-CAM 근거 보여줘', '판독문 초안 요약해줘'처럼 이어서 물어볼 수 있습니다.")
+    return "\n".join(lines)
+
+
+def build_initial_chat(result: dict, initial_question: str) -> List[Dict[str, str]]:
+    messages: List[Dict[str, str]] = []
+    if initial_question.strip():
+        messages.append({"role": "user", "content": initial_question.strip()})
+        messages.append({"role": "agent", "content": build_agent_reply(initial_question, result)})
+    else:
+        messages.append({
+            "role": "agent",
+            "content": "분석이 완료되었습니다. 이 케이스 묶음에 대해 계속 질문할 수 있습니다. 예: '가장 위험한 영상부터 정리해줘', '첫 번째와 마지막 영상을 비교해줘', '심비대 확률만 알려줘', '판독문 초안을 요약해줘'.",
+        })
+    return messages
+
+
+def render_chat_messages(messages: List[Dict[str, str]]) -> None:
+    html_parts = ['<div class="chat-panel">']
+    if not messages:
+        html_parts.append('<div class="chat-hint">분석 실행 후 Agent와 후속 질문을 주고받을 수 있습니다.</div>')
+    for msg in messages:
+        role = msg.get("role", "agent")
+        is_user = role == "user"
+        role_label = "YOU" if is_user else "CXR AGENT"
+        body = escape(str(msg.get("content", ""))).replace("\n", "<br>")
+        klass = "user" if is_user else "agent"
+        html_parts.append(
+            f'<div class="chat-row {klass}"><div class="chat-bubble {klass}">'
+            f'<div class="chat-role">{role_label}</div><div class="chat-body">{body}</div>'
+            f'</div></div>'
+        )
+    html_parts.append('</div>')
+    st.markdown("".join(html_parts), unsafe_allow_html=True)
+
+
+def _rerun() -> None:
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
+
+
+def render_agent_chat(result: dict) -> None:
+    st.markdown('<div class="section-title">Agent 대화 창</div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+<div class="agent-card">
+    <h3>MedRAX-style interactive chat</h3>
+    <p>업로드한 여러 영상의 분석 결과를 기반으로 Agent에게 계속 질문할 수 있습니다. 대화는 현재 세션에서 유지되며, 아래 이미지별 판독·피드백 기능은 그대로 유지됩니다.</p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    st.session_state.setdefault("agent_chat_messages", [])
+    st.session_state.setdefault("agent_chat_nonce", 0)
+    render_chat_messages(st.session_state["agent_chat_messages"])
+
+    with st.form("agent_followup_form", clear_on_submit=False):
+        input_key = f"agent_followup_input_{st.session_state['agent_chat_nonce']}"
+        followup = st.text_area(
+            "Agent에게 후속 질문",
+            placeholder="예: 폐렴 의심 영상만 정리해줘. / 첫 번째와 마지막 영상을 비교해줘. / 어떤 영상을 먼저 봐야 해? / 품질 문제 있는 파일 있어?",
+            height=135,
+            key=input_key,
+        )
+        col_send, col_clear = st.columns([3, 1])
+        with col_send:
+            send = st.form_submit_button("질문 보내기", type="primary", use_container_width=True)
+        with col_clear:
+            clear = st.form_submit_button("대화 초기화", use_container_width=True)
+
+    if clear:
+        st.session_state["agent_chat_messages"] = build_initial_chat(result, "")
+        st.session_state["agent_chat_nonce"] += 1
+        _rerun()
+    if send:
+        if followup.strip():
+            st.session_state["agent_chat_messages"].append({"role": "user", "content": followup.strip()})
+            st.session_state["agent_chat_messages"].append({"role": "agent", "content": build_agent_reply(followup, result)})
+            st.session_state["agent_chat_nonce"] += 1
+            _rerun()
+        else:
+            st.warning("질문을 입력한 뒤 전송하세요.")
+
+
 with st.sidebar:
     st.markdown("### 🧠 Agentic Workbench")
     st.caption("MedRAX식 multi-tool CXR 워크플로우")
@@ -274,7 +536,7 @@ st.markdown(
     </p>
     <span class="agent-pill">Multi-image upload</span>
     <span class="agent-pill">DICOM-aware routing</span>
-    <span class="agent-pill">Tool trace</span>
+    <span class="agent-pill">Interactive chat</span>
     <span class="agent-pill">Per-case draft & feedback</span>
     <span class="agent-pill">Follow-up comparison</span>
 </div>
@@ -286,7 +548,7 @@ with st.expander("이 페이지가 기존 App과 다른 점", expanded=True):
     st.markdown(
         """
 - **기존 App**: 1장 중심 분석, Grad-CAM, 판독문 초안, 의료진 피드백을 안정적으로 유지합니다.
-- **Agentic Workbench**: 여러 장을 한 케이스 묶음으로 분석하고, MedRAX처럼 도구 호출 흐름을 보여주며, 이미지별 결과와 전체 비교를 함께 제공합니다.
+- **Agentic Workbench**: 여러 장을 한 케이스 묶음으로 분석하고, MedRAX처럼 Agent와 후속 질문을 계속 주고받으며, 이미지별 결과와 전체 비교를 함께 제공합니다.
 - **학습 과정 변경 없음**: 새 모델을 학습하지 않고 기존 `/predict`, Grad-CAM, report draft, feedback queue를 Agent 오케스트레이션으로 확장합니다.
         """
     )
@@ -298,16 +560,20 @@ uploaded_files = st.file_uploader(
     help="동일 환자의 과거/현재 영상 또는 여러 케이스를 한 번에 넣어 이미지별 초안과 비교 요약을 생성합니다.",
 )
 question = st.text_area(
-    "Agent에게 물어볼 질문 또는 비교 요청",
+    "Agent에게 처음 물어볼 질문 또는 비교 요청",
     placeholder="예: 첫 번째 영상과 마지막 영상에서 악화된 소견이 있는지 비교해줘. / 기흉 의심 케이스를 우선순위로 정리해줘.",
-    height=80,
+    height=125,
 )
 
 run = st.button("Agent 분석 실행", type="primary", use_container_width=True, disabled=not uploaded_files or not health)
 if run:
     with st.spinner("Agent가 입력 라우팅 → 모델 추론 → 판독 초안 → 품질 점검 → ROI 스캐폴드 → 비교 요약을 실행 중입니다..."):
-        st.session_state["agent_result"] = call_agent_api(uploaded_files, model_key, threshold, question)
+        result_payload = call_agent_api(uploaded_files, model_key, threshold, question)
+        st.session_state["agent_result"] = result_payload
         st.session_state["agent_uploaded_lookup"] = {f.name: f.getvalue() for f in uploaded_files}
+        if result_payload:
+            st.session_state["agent_chat_messages"] = build_initial_chat(result_payload, question)
+            st.session_state["agent_chat_nonce"] = st.session_state.get("agent_chat_nonce", 0) + 1
 
 result = st.session_state.get("agent_result")
 uploaded_lookup = st.session_state.get("agent_uploaded_lookup", {})
@@ -366,14 +632,7 @@ else:
             })[["질환", "첫 영상 확률", "마지막 영상 확률", "변화량"]]
             st.dataframe(delta_df, width="stretch", hide_index=True)
 
-    st.markdown('<div class="section-title">Agent Tool Trace</div>', unsafe_allow_html=True)
-    trace_cols = st.columns(2)
-    for idx, item in enumerate(result.get("tool_trace", [])):
-        with trace_cols[idx % 2]:
-            st.markdown(
-                f"<div class='trace-step'><b>{item.get('step')}. {escape(str(item.get('tool')))}</b><br><span class='small-muted'>{escape(str(item.get('description')))}</span></div>",
-                unsafe_allow_html=True,
-            )
+    render_agent_chat(result)
 
     st.markdown('<div class="section-title">이미지별 판독·피드백</div>', unsafe_allow_html=True)
     if cases:
