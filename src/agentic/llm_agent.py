@@ -232,6 +232,7 @@ def compact_agent_result(result: Mapping[str, Any]) -> Dict[str, Any]:
                 "top_probability": case.get("top_probability") or prediction.get("Top_Probability"),
                 "detected_diseases": list(case.get("detected_diseases") or prediction.get("Detected_Diseases") or [])[:8],
                 "top_probabilities": list(top_probs or [])[:5],
+                "probabilities": {str(label): round(_safe_float(prob), 4) for label, prob in probabilities.items()},
                 "is_placeholder": case.get("is_placeholder") if case.get("is_placeholder") is not None else prediction.get("Is_Placeholder"),
                 "quality_check": _compact_quality(quality),
                 "triage_assessment": _compact_triage(triage),
@@ -395,6 +396,71 @@ def _case_line(case: Mapping[str, Any]) -> str:
     quality = _as_dict(case.get("quality_check"))
     return f"- {idx}. {filename}: {top_kr}({top}) {prob:.1%}, triage={triage.get('triage_label_kr','-')}, 품질={quality.get('quality_grade','-')}"
 
+
+
+def _case_probability(case: Mapping[str, Any], label: str) -> float:
+    probabilities = _as_dict(case.get("probabilities"))
+    if label in probabilities:
+        return _safe_float(probabilities.get(label))
+    for item in list(case.get("top_probabilities") or []):
+        if item.get("label") == label:
+            return _safe_float(item.get("probability"))
+    return 0.0
+
+
+def _comparison_focus_labels(cases: Sequence[Mapping[str, Any]], limit: int = 6) -> List[str]:
+    scores: Dict[str, float] = {}
+    for case in cases or []:
+        probabilities = _as_dict(case.get("probabilities"))
+        if probabilities:
+            for label, prob in probabilities.items():
+                scores[str(label)] = max(scores.get(str(label), 0.0), _safe_float(prob))
+        else:
+            for item in list(case.get("top_probabilities") or []):
+                label = str(item.get("label") or "")
+                if label:
+                    scores[label] = max(scores.get(label, 0.0), _safe_float(item.get("probability")))
+    return [label for label, _ in sorted(scores.items(), key=lambda item: item[1], reverse=True)[:limit]]
+
+
+def _answer_all_case_comparison(cases: Sequence[Mapping[str, Any]], comparison: Mapping[str, Any] | None = None) -> str:
+    case_list = list(cases or [])
+    if not case_list:
+        return "아직 분석된 영상이 없어 여러 영상 비교표를 만들 수 없습니다."
+
+    lines: List[str] = [
+        "여러 장이므로 첫 번째와 마지막 영상만 비교하지 않고, 업로드된 모든 영상의 분석 결과를 동시에 정리합니다.",
+        "\n영상별 요약:",
+    ]
+    for case in case_list:
+        lines.append(_case_line(case))
+        top_probs = _top_probability_lines(case, limit=3)
+        if top_probs:
+            lines.append("  · 상위 확률: " + "; ".join(top_probs))
+
+    focus_labels = _comparison_focus_labels(case_list, limit=6)
+    if focus_labels:
+        lines.append("\n주요 질환별 전체 영상 확률 흐름:")
+        for label in focus_labels:
+            label_kr = DISEASE_KR.get(label, label)
+            flow = " → ".join(
+                f"{case.get('index') or idx + 1}번 {_case_probability(case, label):.1%}"
+                for idx, case in enumerate(case_list)
+            )
+            lines.append(f"- {label_kr}: {flow}")
+
+    comp = _as_dict(comparison)
+    if comp.get("enabled"):
+        lines.append("\n첫 영상 ↔ 마지막 영상 변화량은 보조 지표입니다:")
+        deltas = comp.get("probability_deltas") or comp.get("largest_changes") or comp.get("top_changes") or []
+        for item in list(deltas)[:5] if isinstance(deltas, list) else []:
+            disease = item.get("label_kr") or DISEASE_KR.get(str(item.get("label")), str(item.get("label")))
+            delta = _safe_float(item.get("delta") or item.get("change"))
+            direction = "증가" if delta > 0 else "감소" if delta < 0 else "변화 없음"
+            lines.append(f"- {disease}: {direction} {abs(delta):.1%}p")
+
+    lines.append("\n동일 환자의 시간축 영상이면 촬영 자세·노출·간격 차이를 함께 확인하고, 서로 다른 케이스 묶음이면 순위 비교 용도로만 해석하는 것이 안전합니다.")
+    return "\n".join(lines)
 
 
 _ORDINAL_WORDS = {
@@ -596,12 +662,7 @@ def fallback_agent_reply(question: str, compact_result: Mapping[str, Any], *, in
                 lines.append(f"- {case.get('index')}. {case.get('filename')}: {prob:.1%}")
     elif any(k in question_l for k in ["비교", "변화", "악화", "호전", "compare", "change", "worse", "better"]):
         comparison = _as_dict(summary.get("comparison"))
-        lines.append(str(comparison.get("summary") or "비교 요약이 제공되지 않았습니다."))
-        deltas = comparison.get("probability_deltas") or comparison.get("largest_changes") or comparison.get("top_changes") or []
-        for item in deltas[:5] if isinstance(deltas, list) else []:
-            disease = item.get("label_kr") or item.get("disease") or item.get("label") or "-"
-            delta = _safe_float(item.get("delta") or item.get("change"))
-            lines.append(f"- {DISEASE_KR.get(disease, disease)}: 변화량 {delta:+.1%}p")
+        lines.append(_answer_all_case_comparison(cases, comparison))
     elif any(k in question_l for k in ["품질", "화질", "흐림", "quality", "재촬영"]):
         lines.append("영상 품질 점검 결과입니다.")
         for case in _select_cases(question, cases):
