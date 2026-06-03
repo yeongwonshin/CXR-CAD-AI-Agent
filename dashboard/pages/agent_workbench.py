@@ -208,6 +208,7 @@ def compact_chat_result_payload(result: dict) -> dict:
             "top_probability": case.get("top_probability"),
             "detected_diseases": (case.get("detected_diseases") or [])[:8],
             "top_probabilities": top_probabilities,
+            "probabilities": {label: round(float(prob or 0.0), 4) for label, prob in probs.items()},
             "is_placeholder": case.get("is_placeholder"),
             "quality_check": {
                 "quality_grade": quality.get("quality_grade"),
@@ -417,6 +418,115 @@ def _label_kr(label: str | None) -> str:
 def _case_name(case: dict, idx: int) -> str:
     filename = case.get("filename") or f"case_{idx + 1}"
     return f"{idx + 1}번 영상({filename})"
+
+
+def _case_display_label(case: dict, idx: int, max_len: int = 26) -> str:
+    filename = str(case.get("filename") or f"case_{idx + 1}")
+    if len(filename) > max_len:
+        filename = filename[: max_len - 3].rstrip() + "..."
+    return f"{idx + 1}. {filename}"
+
+
+def _has_gradcam(case: dict) -> bool:
+    prediction = case.get("prediction", {}) or {}
+    gradcam = prediction.get("GradCAM_Base64", "")
+    return bool(gradcam and len(str(gradcam)) > 500)
+
+
+def build_all_case_overview_df(cases: List[dict], threshold_value: float) -> pd.DataFrame:
+    """Build one row per uploaded image so the Workbench compares all cases at once."""
+    rows: List[dict] = []
+    for idx, case in enumerate(cases or []):
+        profile = case.get("agent_profile", {}) or {}
+        quality = profile.get("quality_check", {}) or {}
+        triage = profile.get("triage_assessment", {}) or {}
+        probs = case.get("probabilities", {}) or {}
+        top3 = sorted(probs.items(), key=lambda item: float(item[1] or 0.0), reverse=True)[:3]
+        detected = case.get("detected_diseases", []) or []
+        rows.append({
+            "영상": idx + 1,
+            "파일명": case.get("filename", "-"),
+            "Top 소견": _label_kr(case.get("top_disease")),
+            "Top 확률": _pct(case.get("top_probability")),
+            "임계값 이상 소견": ", ".join(_label_kr(d) for d in detected) if detected else "없음",
+            "상위 3개 확률": " / ".join(f"{_label_kr(label)} {_pct(prob)}" for label, prob in top3),
+            "우선도": triage.get("triage_label_kr", "-"),
+            "품질": f"{quality.get('quality_grade', '-')} ({quality.get('quality_score', '-')}/100)",
+            "Grad-CAM": "제공" if _has_gradcam(case) else "없음/Placeholder",
+            "DICOM": "예" if ((case.get("prediction", {}) or {}).get("Image_Metadata", {}) or {}).get("is_dicom_input") else "아니오",
+            "Placeholder": "예" if case.get("is_placeholder") else "아니오",
+        })
+    return pd.DataFrame(rows)
+
+
+def build_all_case_probability_df(cases: List[dict]) -> pd.DataFrame:
+    """Return a wide probability table: each image row contains every disease probability."""
+    rows: List[dict] = []
+    for idx, case in enumerate(cases or []):
+        probs = case.get("probabilities", {}) or {}
+        row = {
+            "영상": idx + 1,
+            "파일명": case.get("filename", "-"),
+            "Top 소견": _label_kr(case.get("top_disease")),
+        }
+        for label in DISEASE_LABELS:
+            row[DISEASE_LABELS_KR.get(label, label)] = _pct(probs.get(label, 0.0))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def render_all_case_probability_heatmap(cases: List[dict], threshold_value: float) -> go.Figure | None:
+    """Render all uploaded images x disease probabilities as a simultaneous comparison heatmap."""
+    if not cases:
+        return None
+    labels = DISEASE_LABELS
+    x_labels = [_case_display_label(case, idx) for idx, case in enumerate(cases)]
+    y_labels = [DISEASE_LABELS_KR.get(label, label) for label in labels]
+    z = []
+    hover = []
+    for label in labels:
+        row_vals = []
+        row_hover = []
+        for idx, case in enumerate(cases):
+            probs = case.get("probabilities", {}) or {}
+            value = float(probs.get(label, 0.0) or 0.0)
+            row_vals.append(value)
+            row_hover.append(
+                f"영상: {_case_display_label(case, idx)}<br>질환: {DISEASE_LABELS_KR.get(label, label)}<br>확률: {value:.1%}"
+            )
+        z.append(row_vals)
+        hover.append(row_hover)
+
+    threshold_value = max(0.01, min(float(threshold_value or 0.3), 0.99))
+    colorscale = [
+        [0.0, "#14b8a6"],
+        [max(0.01, threshold_value), "#f59e0b"],
+        [1.0, "#e11d48"],
+    ]
+    fig = go.Figure(data=go.Heatmap(
+        z=z,
+        x=x_labels,
+        y=y_labels,
+        zmin=0,
+        zmax=1,
+        colorscale=colorscale,
+        colorbar=dict(title="확률", tickformat=".0%"),
+        text=[[f"{v:.0%}" for v in row] for row in z],
+        texttemplate="%{text}",
+        textfont=dict(size=10, color="white"),
+        hoverinfo="text",
+        hovertext=hover,
+    ))
+    fig.update_layout(
+        height=max(430, 28 * len(labels) + 150),
+        margin=dict(l=0, r=0, t=30, b=70),
+        xaxis=dict(tickangle=-25, tickfont=dict(size=10, family="Inter", color="#334155")),
+        yaxis=dict(tickfont=dict(size=11, family="Inter", color="#334155")),
+        plot_bgcolor="rgba(255,255,255,0)",
+        paper_bgcolor="rgba(255,255,255,0)",
+        font=dict(family="Inter"),
+    )
+    return fig
 
 
 def _top_case_lines(result: dict, limit: int = 4) -> List[str]:
@@ -716,7 +826,7 @@ with st.sidebar:
     model_label = st.radio("분석 모델", list(MODEL_OPTIONS.values()), index=0)
     model_key = [k for k, v in MODEL_OPTIONS.items() if v == model_label][0]
     threshold = st.slider("감지 임계값", 0.1, 0.9, 0.3, 0.05)
-    
+ 
 st.markdown(
     """
 <div class="agent-header">
@@ -806,10 +916,32 @@ else:
     with m4:
         st.markdown(f"<div class='metric-card'><div class='value'>{result.get('model_key', '-')}</div><div class='label'>모델</div></div>", unsafe_allow_html=True)
 
+    st.markdown('<div class="section-title">전체 영상 동시 분석</div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+<div class="agent-card">
+    <h3>업로드한 모든 영상의 분석 결과</h3>
+    <p>여러 장을 업로드한 경우 첫 번째와 마지막 영상만 보지 않고, 모든 영상의 Top 소견·우선도·품질·Grad-CAM 여부·질환 확률을 한 번에 비교합니다.</p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    overview_df = build_all_case_overview_df(cases, float(result.get("threshold", threshold)))
+    if not overview_df.empty:
+        st.dataframe(overview_df, width="stretch", hide_index=True)
+
+    with st.expander("질환별 확률 매트릭스 · 모든 영상 동시 보기", expanded=True):
+        probability_df = build_all_case_probability_df(cases)
+        if not probability_df.empty:
+            st.dataframe(probability_df, width="stretch", hide_index=True)
+        heatmap_fig = render_all_case_probability_heatmap(cases, float(result.get("threshold", threshold)))
+        if heatmap_fig is not None:
+            st.plotly_chart(heatmap_fig, width="stretch", config={"displayModeBar": False})
+
     comparison = summary.get("comparison") or {}
     if comparison.get("enabled"):
-        st.markdown('<div class="section-title">영상 간 변화 비교</div>', unsafe_allow_html=True)
-        st.markdown(f"<div class='agent-card'><p>{escape(str(comparison.get('summary', '')))}</p></div>", unsafe_allow_html=True)
+        st.markdown('<div class="section-title">첫 영상 ↔ 마지막 영상 변화량 참고</div>', unsafe_allow_html=True)
+        st.markdown(f"<div class='agent-card'><p>{escape(str(comparison.get('summary', '')))}</p><p class='small-muted'>위의 전체 영상 동시 분석 테이블이 기본 비교 화면이며, 아래 표는 시간축이 있는 케이스에서 첫 영상과 마지막 영상의 변화량을 빠르게 확인하기 위한 보조 표입니다.</p></div>", unsafe_allow_html=True)
         deltas = comparison.get("probability_deltas", [])
         if deltas:
             delta_df = pd.DataFrame(deltas)
