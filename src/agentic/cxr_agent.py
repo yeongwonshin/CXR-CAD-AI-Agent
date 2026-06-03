@@ -294,12 +294,55 @@ def _top_items(case: Mapping[str, Any], limit: int = 5) -> list[tuple[str, float
     return sorted(((str(k), _safe_float(v)) for k, v in probs.items()), key=lambda item: item[1], reverse=True)[:limit]
 
 
+def _case_overview_rows(cases: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for idx, case in enumerate(cases):
+        profile = case.get("agent_profile") or {}
+        triage = profile.get("triage_assessment") or {}
+        quality = profile.get("quality_check") or {}
+        top_items = _top_items(case, limit=3)
+        rows.append(
+            {
+                "index": idx + 1,
+                "filename": case.get("filename"),
+                "case_id": case.get("case_id"),
+                "top_disease": case.get("top_disease"),
+                "top_disease_kr": DISEASE_KR.get(str(case.get("top_disease")), str(case.get("top_disease"))),
+                "top_probability": round(_safe_float(case.get("top_probability")), 4),
+                "top3_probabilities": [
+                    {"label": label, "label_kr": DISEASE_KR.get(label, label), "probability": round(prob, 4)}
+                    for label, prob in top_items
+                ],
+                "detected_diseases": list(case.get("detected_diseases") or [])[:8],
+                "triage_label_kr": triage.get("triage_label_kr"),
+                "quality_grade": quality.get("quality_grade"),
+                "quality_score": quality.get("quality_score"),
+                "is_placeholder": bool(case.get("is_placeholder")),
+            }
+        )
+    return rows
+
+
+def _probability_matrix_rows(cases: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    labels = sorted({label for case in cases for label in ((case.get("probabilities") or {}).keys())})
+    rows: List[Dict[str, Any]] = []
+    for label in labels:
+        row: Dict[str, Any] = {"label": label, "label_kr": DISEASE_KR.get(label, label)}
+        for idx, case in enumerate(cases):
+            probs = case.get("probabilities") or {}
+            row[f"case_{idx + 1}"] = round(_safe_float(probs.get(label, 0.0)), 4)
+        rows.append(row)
+    return rows
+
+
 def build_case_comparison(cases: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     if len(cases) < 2:
         return {
             "enabled": False,
             "summary": "비교 분석은 2장 이상 업로드했을 때 활성화됩니다.",
             "probability_deltas": [],
+            "case_overview": _case_overview_rows(cases),
+            "probability_matrix": _probability_matrix_rows(cases),
         }
 
     first = cases[0]
@@ -343,6 +386,8 @@ def build_case_comparison(cases: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "probability_deltas": deltas_sorted[:8],
         "rising_findings": rising,
         "falling_findings": falling,
+        "case_overview": _case_overview_rows(cases),
+        "probability_matrix": _probability_matrix_rows(cases),
     }
 
 
