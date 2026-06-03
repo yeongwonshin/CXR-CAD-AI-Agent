@@ -716,11 +716,7 @@ with st.sidebar:
     model_label = st.radio("분석 모델", list(MODEL_OPTIONS.values()), index=0)
     model_key = [k for k, v in MODEL_OPTIONS.items() if v == model_label][0]
     threshold = st.slider("감지 임계값", 0.1, 0.9, 0.3, 0.05)
-    st.divider()
-    st.page_link("app.py", label="단일 이미지 기본 분석")
-    st.page_link("pages/analysis_results.py", label="Result Analysis")
-    st.page_link("pages/reliability_readiness.py", label="Reliability Readiness")
-
+    
 st.markdown(
     """
 <div class="agent-header">
