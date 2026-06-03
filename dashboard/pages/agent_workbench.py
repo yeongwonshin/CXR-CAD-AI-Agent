@@ -1,4 +1,4 @@
-"""🧠 Agentic Case Workbench — MedRAX-style multi-image CXR workflow.
+""" Agentic Case Workbench — MedRAX-style multi-image CXR workflow.
 
 기존 CXR-CAD 모델 학습 결과를 그대로 사용하면서, 플랫폼 레벨에서
 MedRAX의 강점인 multi-image 입력, 대화형 agent, DICOM 처리, 케이스 비교,
