@@ -764,16 +764,7 @@ def render_latest_agent_trace(messages: List[Dict[str, Any]]) -> None:
     engine = meta.get("engine", "-")
     model = meta.get("model") or "local fallback"
     fallback = "YES" if meta.get("fallback") else "NO"
-    st.markdown(
-        f"""
-<div class="agent-console">
-  <h4>🧠 Latest Agent Reasoning Console</h4>
-  <div class="trace-note">Engine: <b>{escape(str(engine))}</b> · Model: <b>{escape(str(model))}</b> · Fallback: <b>{fallback}</b></div>
-  <div style="margin-top:0.55rem;">{_tool_chips(used_tools)}</div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+ 
 
     with st.expander("Planner / Tool trace 자세히 보기", expanded=False):
         plan = meta.get("agent_plan") or []
