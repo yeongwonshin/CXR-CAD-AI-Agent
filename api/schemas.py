@@ -66,6 +66,8 @@ class PredictionResult(BaseModel):
     Anatomy_Assessment: Dict[str, Any] = Field(default_factory=dict, description="질환별 해부학적 ROI 검토 스캐폴드")
     Triage_Assessment: Dict[str, Any] = Field(default_factory=dict, description="Agent 기반 우선 검토 등급과 사유")
     Agent_Summary: str = Field(default="", description="해당 이미지에 대한 Agent 요약")
+    Agent_Tool_Trace: List[Dict[str, Any]] = Field(default_factory=list, description="동적 Agent가 실제 실행한 도구 호출 로그")
+    Agent_Plan: List[Dict[str, Any]] = Field(default_factory=list, description="동적 Agent planner의 iteration별 계획 기록")
 
     model_config = {
         "json_schema_extra": {
@@ -116,6 +118,8 @@ class AgentCaseResult(BaseModel):
     detected_diseases: List[str] = Field(default_factory=list, description="임계값 이상 질환")
     report_draft: str = Field(default="", description="해당 이미지별 판독문 초안")
     agent_profile: Dict[str, Any] = Field(default_factory=dict, description="품질·해부학 ROI·triage·DICOM 메타데이터")
+    agent_tool_trace: List[Dict[str, Any]] = Field(default_factory=list, description="해당 케이스에서 실제 실행된 동적 Agent tool trace")
+    agent_plan: List[Dict[str, Any]] = Field(default_factory=list, description="해당 케이스의 planner iteration 기록")
     is_placeholder: bool = Field(..., description="Placeholder 응답 여부")
 
 
@@ -129,6 +133,7 @@ class AgentBatchResponse(BaseModel):
     cases: List[AgentCaseResult] = Field(default_factory=list, description="이미지별 결과")
     agent_summary: Dict[str, Any] = Field(default_factory=dict, description="다중 이미지 비교·triage·사용자 질문 기반 요약")
     tool_trace: List[Dict[str, Any]] = Field(default_factory=list, description="Agent 도구 호출 감사 로그")
+    agent_plan: List[Dict[str, Any]] = Field(default_factory=list, description="배치 및 케이스 단위 planner 기록")
     safety_note: str = Field(default="본 결과는 최종 진단이 아니며 의료진 검토가 필요합니다.", description="안전 고지")
 
 
@@ -158,6 +163,8 @@ class AgentChatResponse(BaseModel):
     generated_at: Optional[str] = Field(default=None, description="응답 생성 시각")
     usage: Dict[str, Any] = Field(default_factory=dict, description="LLM 토큰 사용량 등 provider 응답 메타데이터")
     safety_note: str = Field(default="본 결과는 최종 진단이 아니며 의료진 검토가 필요합니다.", description="안전 고지")
+    tool_trace: List[Dict[str, Any]] = Field(default_factory=list, description="후속 질문 답변 시 선택된 context tool trace")
+    agent_plan: List[Dict[str, Any]] = Field(default_factory=list, description="후속 질문 답변 planner 기록")
     error: Optional[str] = Field(default=None, description="fallback 전환 사유 또는 LLM 오류 메시지")
 
 
