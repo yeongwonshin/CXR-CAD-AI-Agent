@@ -52,7 +52,9 @@ from api.schemas import (
 )
 from src.preprocess.dicom_utils import dicom_to_pil, is_dicom, parse_dicom_metadata
 from src.preprocess.transforms import preprocess_single_image
-from src.agentic import build_agent_batch_summary, build_agent_case_profile, build_tool_trace, generate_llm_agent_reply
+from src.agentic import build_agent_batch_summary, generate_llm_agent_reply
+from src.agentic.cxr_agent import analyze_image_quality, build_anatomy_assessment, build_triage_assessment
+from src.agentic.dynamic_agent import CXRCaseState, CXRRuntimeTool, DynamicBatchWorkflowAgent, DynamicCXRWorkflowAgent
 from src.train.models import (
     DISEASE_LABELS,
     SUPPORTED_MODELS,
@@ -538,6 +540,195 @@ def _build_gradcam_overlay(model_key: str, image: Image.Image, top_disease: str,
     return gradcam_b64
 
 
+
+def _build_case_agent_summary(
+    *,
+    filename: str,
+    probs: Dict[str, float],
+    detected: List[str],
+    top_disease: str,
+    triage: Dict[str, object],
+    quality: Dict[str, object],
+    is_placeholder: bool,
+) -> str:
+    """Compact single-case summary generated from dynamic tool observations."""
+    top_prob = probs.get(top_disease, 0.0) * 100
+    top_kr = _disease_kr(top_disease)
+    detected_kr = ", ".join(_disease_kr(d) for d in detected) if detected else "없음"
+    prefix = "[시연용] " if is_placeholder else ""
+    triage_label = triage.get("triage_label_kr", "미분류") if isinstance(triage, dict) else "미분류"
+    quality_grade = quality.get("quality_grade", "미실행") if isinstance(quality, dict) else "미실행"
+    return (
+        f"{prefix}{filename}: 동적 Agent가 선택 실행한 도구 기준 Top 소견은 "
+        f"{top_kr}({top_prob:.1f}%)이며, 임계값 이상 소견은 {detected_kr}입니다. "
+        f"Agent 판정은 {triage_label}, 영상 품질은 {quality_grade}입니다."
+    )
+
+
+def _build_dynamic_cxr_tools() -> List[CXRRuntimeTool]:
+    """Create runtime tools that the dynamic agent can select per case."""
+
+    def input_router(state: CXRCaseState) -> Dict[str, object]:
+        image, dicom_metadata, is_dicom_input = _parse_image_payload(
+            state.contents,
+            state.filename,
+            state.content_type,
+        )
+        return {
+            "case_id": _build_case_id(state.contents),
+            "image": image,
+            "dicom_metadata": dicom_metadata,
+            "is_dicom_input": is_dicom_input,
+            "image_metadata": {
+                "filename": state.filename,
+                "content_type": state.content_type or "",
+                "is_dicom_input": is_dicom_input,
+                "width": image.width,
+                "height": image.height,
+                "dicom_metadata": dicom_metadata,
+            },
+        }
+
+    def classifier_tool(state: CXRCaseState) -> Dict[str, object]:
+        model_key = state.model_key
+        if model_key not in API_MODELS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"지원하지 않는 모델: '{model_key}'. 지원 목록: {API_MODELS}",
+            )
+        image = state.get("image")
+        start_ms = time.time()
+        is_placeholder = False
+        if model_key == "ensemble":
+            if any(m is not None for m in _model_registry.values()):
+                probs = _real_predict(model_key, image)
+            else:
+                is_placeholder = True
+        else:
+            if _model_registry.get(model_key) is not None:
+                probs = _real_predict(model_key, image)
+            else:
+                is_placeholder = True
+
+        if is_placeholder:
+            time.sleep(0.3)
+            probs = _placeholder_predict(model_key)
+
+        inference_ms = int((time.time() - start_ms) * 1000)
+        detected = [d for d, prob in probs.items() if prob >= state.threshold]
+        top_disease = max(probs, key=probs.get)
+        model_name = get_model_info().get(model_key, {}).get("display_name", model_key)
+        return {
+            "probs": probs,
+            "detected": detected,
+            "top_disease": top_disease,
+            "top_probability": round(probs[top_disease], 4),
+            "is_placeholder": is_placeholder,
+            "inference_ms": inference_ms,
+            "model_name": model_name,
+        }
+
+    def report_tool(state: CXRCaseState) -> Dict[str, object]:
+        report = _build_report_draft(
+            probs=dict(state.get("probs", {})),
+            detected=list(state.get("detected", [])),
+            top_disease=str(state.get("top_disease")),
+            threshold=state.threshold,
+            is_placeholder=bool(state.get("is_placeholder")),
+        )
+        return {"report": report}
+
+    def gradcam_tool(state: CXRCaseState) -> Dict[str, object]:
+        gradcam_b64 = _build_gradcam_overlay(
+            state.model_key,
+            state.get("image"),
+            str(state.get("top_disease")),
+            bool(state.get("is_placeholder")),
+        )
+        return {"gradcam_b64": gradcam_b64, "has_gradcam": not bool(state.get("is_placeholder"))}
+
+    def quality_tool(state: CXRCaseState) -> Dict[str, object]:
+        quality = analyze_image_quality(
+            state.get("image"),
+            is_dicom_input=bool(state.get("is_dicom_input")),
+        )
+        return {"quality_check": quality}
+
+    def anatomy_tool(state: CXRCaseState) -> Dict[str, object]:
+        anatomy = build_anatomy_assessment(
+            state.get("image"),
+            state.get("probs", {}),
+            state.get("detected", []),
+            str(state.get("top_disease")),
+        )
+        return {"anatomy_assessment": anatomy}
+
+    def triage_tool(state: CXRCaseState) -> Dict[str, object]:
+        triage = build_triage_assessment(
+            state.get("probs", {}),
+            state.get("detected", []),
+            str(state.get("top_disease")),
+            state.threshold,
+            state.get("quality_check", {}),
+            bool(state.get("is_placeholder")),
+        )
+        return {"triage_assessment": triage}
+
+    return [
+        CXRRuntimeTool(
+            name="InputRouter",
+            description="Route PNG/JPEG/DICOM payloads and extract safe image metadata.",
+            requires=(),
+            provides=("image", "dicom_metadata", "is_dicom_input", "case_id", "image_metadata"),
+            run=input_router,
+            required=True,
+        ),
+        CXRRuntimeTool(
+            name="CXRClassifier",
+            description="Run the selected CXR model or placeholder classifier and expose 14-label probabilities.",
+            requires=("image",),
+            provides=("probs", "detected", "top_disease", "top_probability", "is_placeholder", "inference_ms"),
+            run=classifier_tool,
+            required=True,
+        ),
+        CXRRuntimeTool(
+            name="ReportDraftTool",
+            description="Generate a clinician-editable Korean/English report draft from classifier observations.",
+            requires=("probs", "detected", "top_disease", "is_placeholder"),
+            provides=("report",),
+            run=report_tool,
+        ),
+        CXRRuntimeTool(
+            name="GradCAMTool",
+            description="Generate Grad-CAM visual attribution when evidence/localization is useful.",
+            requires=("image", "top_disease", "is_placeholder"),
+            provides=("gradcam_b64", "has_gradcam"),
+            run=gradcam_tool,
+        ),
+        CXRRuntimeTool(
+            name="QualityCheckTool",
+            description="Assess image size, brightness, contrast, entropy, sharpness and windowing limitations.",
+            requires=("image", "is_dicom_input"),
+            provides=("quality_check",),
+            run=quality_tool,
+        ),
+        CXRRuntimeTool(
+            name="AnatomicalROITool",
+            description="Create a coarse anatomical review scaffold based on predicted findings.",
+            requires=("image", "probs", "detected", "top_disease"),
+            provides=("anatomy_assessment",),
+            run=anatomy_tool,
+        ),
+        CXRRuntimeTool(
+            name="TriageTool",
+            description="Combine probabilities, critical findings, placeholder status and quality into review priority.",
+            requires=("probs", "detected", "top_disease", "is_placeholder"),
+            provides=("triage_assessment",),
+            run=triage_tool,
+        ),
+    ]
+
+
 def _run_prediction_pipeline(
     *,
     contents: bytes,
@@ -545,8 +736,9 @@ def _run_prediction_pipeline(
     content_type: Optional[str],
     model_key: str,
     threshold: float,
+    question: str = "",
 ) -> PredictionResult:
-    """Shared single-image inference path used by /predict and /agent/analyze."""
+    """Shared dynamic single-image agent path used by /predict and /agent/analyze."""
     if model_key not in API_MODELS:
         raise HTTPException(
             status_code=400,
@@ -555,80 +747,71 @@ def _run_prediction_pipeline(
     if not contents:
         raise HTTPException(status_code=400, detail="빈 파일이 업로드되었습니다.")
 
-    image, dicom_metadata, is_dicom_input = _parse_image_payload(contents, filename, content_type)
-
-    start_ms = time.time()
-    is_placeholder = False
-    if model_key == "ensemble":
-        if any(m is not None for m in _model_registry.values()):
-            probs = _real_predict(model_key, image)
-        else:
-            is_placeholder = True
-    else:
-        if _model_registry.get(model_key) is not None:
-            probs = _real_predict(model_key, image)
-        else:
-            is_placeholder = True
-
-    if is_placeholder:
-        time.sleep(0.3)
-        probs = _placeholder_predict(model_key)
-
-    inference_ms = int((time.time() - start_ms) * 1000)
-    case_id = _build_case_id(contents)
-    detected = [d for d, p in probs.items() if p >= threshold]
-    top_disease = max(probs, key=probs.get)
-    model_name = get_model_info().get(model_key, {}).get("display_name", model_key)
-    report = _build_report_draft(
-        probs=probs,
-        detected=detected,
-        top_disease=top_disease,
+    state = CXRCaseState(
+        contents=contents,
+        filename=filename,
+        content_type=content_type,
+        model_key=model_key,
         threshold=threshold,
-        is_placeholder=is_placeholder,
+        question=question,
     )
-    gradcam_b64 = _build_gradcam_overlay(model_key, image, top_disease, is_placeholder)
+    agent = DynamicCXRWorkflowAgent(_build_dynamic_cxr_tools())
+    state = agent.run(state)
+    data = state.data
 
-    agent_profile = build_agent_case_profile(
-        image=image,
+    probs: Dict[str, float] = dict(data.get("probs") or {})
+    detected: List[str] = list(data.get("detected") or [])
+    top_disease = str(data.get("top_disease") or (max(probs, key=probs.get) if probs else ""))
+    report: Dict[str, object] = dict(data.get("report") or {})
+    quality_check: Dict[str, object] = dict(data.get("quality_check") or {})
+    anatomy_assessment: Dict[str, object] = dict(data.get("anatomy_assessment") or {})
+    triage_assessment: Dict[str, object] = dict(data.get("triage_assessment") or {})
+
+    if not triage_assessment and probs:
+        triage_assessment = build_triage_assessment(
+            probs,
+            detected,
+            top_disease,
+            threshold,
+            quality_check,
+            bool(data.get("is_placeholder")),
+        )
+    agent_summary = _build_case_agent_summary(
         filename=filename,
         probs=probs,
         detected=detected,
         top_disease=top_disease,
-        threshold=threshold,
-        is_placeholder=is_placeholder,
-        dicom_metadata=dicom_metadata,
-        is_dicom_input=is_dicom_input,
-    )
-    image_metadata = {
-        "filename": filename,
-        "content_type": content_type or "",
-        "is_dicom_input": is_dicom_input,
-        "width": image.width,
-        "height": image.height,
-        "dicom_metadata": dicom_metadata,
-    }
+        triage=triage_assessment,
+        quality=quality_check,
+        is_placeholder=bool(data.get("is_placeholder")),
+    ) if probs else "동적 Agent 실행 중 분류 결과를 생성하지 못했습니다."
+
+    image_metadata = dict(data.get("image_metadata") or {})
+    image_metadata["agent_plan"] = state.plan_history
 
     return PredictionResult(
         **probs,
-        Case_ID=case_id,
+        Case_ID=str(data.get("case_id")),
         Detected_Diseases=detected,
         Top_Disease=top_disease,
-        Top_Probability=round(probs[top_disease], 4),
-        GradCAM_Base64=gradcam_b64,
-        Inference_Time_ms=inference_ms,
-        Model_Used=model_name,
+        Top_Probability=round(float(data.get("top_probability", probs.get(top_disease, 0.0))), 4),
+        GradCAM_Base64=str(data.get("gradcam_b64") or _FAKE_GRADCAM_B64),
+        Inference_Time_ms=int(data.get("inference_ms", 0)),
+        Model_Used=str(data.get("model_name") or get_model_info().get(model_key, {}).get("display_name", model_key)),
         Model_Key=model_key,
-        Is_Placeholder=is_placeholder,
-        Report_Draft=str(report["Report_Draft_KR"]),
-        Findings_KR=str(report["Findings_KR"]),
-        Impression_KR=str(report["Impression_KR"]),
-        Need_Review_Reason=str(report["Need_Review_Reason"]),
+        Is_Placeholder=bool(data.get("is_placeholder")),
+        Report_Draft=str(report.get("Report_Draft_KR", "")),
+        Findings_KR=str(report.get("Findings_KR", "")),
+        Impression_KR=str(report.get("Impression_KR", "")),
+        Need_Review_Reason=str(report.get("Need_Review_Reason", "")),
         Clinical_Report=report,
         Image_Metadata=image_metadata,
-        Quality_Check=agent_profile.get("quality_check", {}),
-        Anatomy_Assessment=agent_profile.get("anatomy_assessment", {}),
-        Triage_Assessment=agent_profile.get("triage_assessment", {}),
-        Agent_Summary=str(agent_profile.get("agent_summary", "")),
+        Quality_Check=quality_check,
+        Anatomy_Assessment=anatomy_assessment,
+        Triage_Assessment=triage_assessment,
+        Agent_Summary=agent_summary,
+        Agent_Tool_Trace=state.tool_trace,
+        Agent_Plan=state.plan_history,
     )
 
 
@@ -687,7 +870,6 @@ async def analyze_with_agent(
 
     cases: List[AgentCaseResult] = []
     summary_inputs: List[Dict[str, object]] = []
-    include_dicom = False
     for upload in files:
         contents = await upload.read()
         prediction = _run_prediction_pipeline(
@@ -696,6 +878,7 @@ async def analyze_with_agent(
             content_type=upload.content_type,
             model_key=model_key,
             threshold=threshold,
+            question=question,
         )
         probs = {label: getattr(prediction, label) for label in DISEASE_LABELS}
         agent_profile = {
@@ -704,8 +887,9 @@ async def analyze_with_agent(
             "triage_assessment": prediction.Triage_Assessment,
             "dicom_metadata": prediction.Image_Metadata.get("dicom_metadata", {}),
             "agent_summary": prediction.Agent_Summary,
+            "agent_plan": prediction.Agent_Plan,
+            "tool_trace": prediction.Agent_Tool_Trace,
         }
-        include_dicom = include_dicom or bool(prediction.Image_Metadata.get("is_dicom_input"))
         case = AgentCaseResult(
             filename=upload.filename or "uploaded_image",
             case_id=prediction.Case_ID,
@@ -716,6 +900,8 @@ async def analyze_with_agent(
             detected_diseases=prediction.Detected_Diseases,
             report_draft=prediction.Report_Draft,
             agent_profile=agent_profile,
+            agent_tool_trace=prediction.Agent_Tool_Trace,
+            agent_plan=prediction.Agent_Plan,
             is_placeholder=prediction.Is_Placeholder,
         )
         cases.append(case)
@@ -732,12 +918,30 @@ async def analyze_with_agent(
             }
         )
 
-    agent_summary = build_agent_batch_summary(summary_inputs, question=question)
-    tool_trace = build_tool_trace(
-        case_count=len(cases),
-        include_dicom=include_dicom,
-        include_comparison=len(cases) > 1,
+    batch_agent = DynamicBatchWorkflowAgent()
+    batch_result = batch_agent.run(
+        cases=summary_inputs,
+        question=question,
+        build_summary=lambda case_rows, q: build_agent_batch_summary(case_rows, question=q),
     )
+    agent_summary = dict(batch_result.get("summary") or {})
+    case_traces: List[Dict[str, object]] = []
+    case_plans: List[Dict[str, object]] = []
+    for case in cases:
+        for item in case.agent_tool_trace:
+            trace_item = dict(item)
+            trace_item.setdefault("scope", "case")
+            trace_item.setdefault("case_id", case.case_id)
+            trace_item.setdefault("filename", case.filename)
+            case_traces.append(trace_item)
+        for item in case.agent_plan:
+            plan_item = dict(item)
+            plan_item.setdefault("scope", "case")
+            plan_item.setdefault("case_id", case.case_id)
+            plan_item.setdefault("filename", case.filename)
+            case_plans.append(plan_item)
+    tool_trace = case_traces + list(batch_result.get("tool_trace") or [])
+    agent_plan = case_plans + [{"scope": "batch", "planned_tools": batch_result.get("planned_tools", [])}]
     return AgentBatchResponse(
         status="completed",
         model_key=model_key,
@@ -746,6 +950,7 @@ async def analyze_with_agent(
         cases=cases,
         agent_summary=agent_summary,
         tool_trace=tool_trace,
+        agent_plan=agent_plan,
         safety_note="본 Agent 결과는 최종 진단이 아니며 의료진 검토가 필요합니다.",
     )
 
