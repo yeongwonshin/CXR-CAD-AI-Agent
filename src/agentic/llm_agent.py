@@ -1,11 +1,12 @@
-"""Fast MedRAX-style LLM answer engine for the CXR-CAD workbench.
+"""LLM-first MedRAX-style answer engine for the CXR-CAD workbench.
 
-The trained CXR models remain unchanged. This module turns runtime outputs into
-small tool-context summaries and uses an OpenAI-compatible chat model as the
-agent brain. To keep interaction fast, common tool-specific follow-up questions
-(comparison, quality, Grad-CAM, ROI, report draft, triage, disease-specific
-lookups) are answered directly from the already-computed CXR-CAD tool outputs;
-open-ended synthesis questions use the LLM over a compact context.
+The trained CXR models remain unchanged. This module makes follow-up chat feel
+like an agent instead of a fixed FAQ layer: a planner chooses which existing
+CXR-CAD tool contexts are relevant, a trace is emitted for the UI, and an
+OpenAI-compatible LLM synthesizes the final answer from those observations.
+When no LLM endpoint is configured, the deterministic fallback remains grounded
+in the same tool observations but explicitly marks missing data instead of
+pretending a tool produced a result.
 """
 
 from __future__ import annotations
@@ -104,6 +105,55 @@ def _env_bool(name: str, default: bool = True) -> bool:
     if value is None:
         return default
     return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(float(os.getenv(name, str(default))))
+    except Exception:
+        return default
+
+
+def _llm_configured() -> bool:
+    _load_project_env()
+    return bool(os.getenv("OPENAI_API_KEY") or os.getenv("CXR_AGENT_LLM_API_KEY"))
+
+
+
+
+def get_agent_runtime_status() -> Dict[str, Any]:
+    """Return non-secret runtime settings for the Workbench UI.
+
+    This lets the platform distinguish a real LLM-first agent run from the
+    deterministic grounded fallback during demos. API keys are never returned.
+    """
+    _load_project_env()
+    configured = _llm_configured()
+    model = os.getenv("CXR_AGENT_LLM_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+    base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("CXR_AGENT_LLM_BASE_URL") or "https://api.openai.com/v1"
+    return {
+        "llm_configured": configured,
+        "llm_enabled": _env_bool("CXR_AGENT_LLM_ENABLED", True),
+        "llm_first": _env_bool("CXR_AGENT_LLM_FIRST", True),
+        "llm_planner_enabled": _env_bool("CXR_AGENT_LLM_PLANNER_ENABLED", True),
+        "tool_first_fastpath": _env_bool("CXR_AGENT_TOOL_FIRST_FASTPATH", False),
+        "model": model if configured else None,
+        "base_url": base_url.rsplit("/", 1)[0] + "/..." if configured else None,
+        "timeout_seconds": _env_int("CXR_AGENT_LLM_TIMEOUT", 75),
+        "max_tokens": _env_int("CXR_AGENT_LLM_MAX_TOKENS", 900),
+        "mode_label": "LLM-first MedRAX-style agent" if configured else "local grounded fallback",
+        "demo_recommendation": (
+            "READY: planner + tool trace + LLM synthesis are active."
+            if configured
+            else "Set OPENAI_API_KEY or CXR_AGENT_LLM_API_KEY to avoid deterministic fallback answers."
+        ),
+    }
+
+
+def _clean_missing(value: Any, default: str = "-") -> Any:
+    if value is None or value == "" or value == [] or value == {}:
+        return default
+    return value
 
 
 def _top_probabilities(probabilities: Mapping[str, Any], limit: int = 5) -> List[Dict[str, Any]]:
@@ -205,8 +255,31 @@ def _compact_dicom(value: Any) -> Dict[str, Any]:
 
 
 def compact_agent_result(result: Mapping[str, Any]) -> Dict[str, Any]:
-    """Remove large image payloads and keep only LLM-safe tool outputs."""
+    """Remove large image payloads and keep only LLM-safe tool outputs.
+
+    The Streamlit Workbench may already send a compact payload. In that case we
+    must not compact it a second time, because the nested `prediction` and
+    `agent_profile` objects have intentionally been removed. Double-compaction
+    was causing quality/triage/report context to disappear from chat answers.
+    """
     result = _as_dict(result)
+    existing_cases = list(result.get("cases") or [])
+    if existing_cases:
+        first = _as_dict(existing_cases[0])
+        already_compact = "prediction" not in first and any(
+            key in first for key in ["quality_check", "triage_assessment", "report_draft", "top_probabilities"]
+        )
+        if already_compact:
+            summary = _as_dict(result.get("agent_summary"))
+            return {
+                "status": result.get("status"),
+                "model_key": result.get("model_key"),
+                "threshold": result.get("threshold"),
+                "case_count": result.get("case_count") or len(existing_cases),
+                "cases": [_as_dict(case) for case in existing_cases],
+                "agent_summary": summary,
+                "safety_note": result.get("safety_note") or summary.get("safety_note"),
+            }
     compact_cases: List[Dict[str, Any]] = []
     for idx, raw_case in enumerate(result.get("cases", []) or []):
         case = _as_dict(raw_case)
@@ -289,9 +362,22 @@ def _history_to_messages(history: Sequence[Mapping[str, str]], limit: int = 4) -
 def _system_prompt() -> str:
     return """
 You are the CXR-CAD runtime agent, modeled after MedRAX's LLM-plus-tools workflow.
-Use only the supplied compact tool context from CXR-CAD. Do not invent findings.
-Answer in Korean unless the user asks otherwise. Be concise and clinically useful.
-Mention Placeholder/demo outputs when present. This is clinical decision support, not final diagnosis.
+You have already selected tool contexts and observed their outputs. Use only the
+supplied CXR-CAD context. Do not invent disease labels, locations, image quality
+grades, Grad-CAM locations, or report findings that are not supported.
+
+Answer in Korean unless the user asks otherwise. Be clinically useful and
+show agent-like reasoning in a compact way:
+1) state what you used,
+2) answer the user's exact question,
+3) list case-specific evidence,
+4) state missing tool outputs honestly,
+5) finish with a brief clinical-safety note.
+
+If quality/triage/report/Grad-CAM fields are missing, do not print '-' as the
+answer. Say that the tool output is unavailable in the current context and
+explain what can and cannot be concluded from the classifier probabilities.
+This is clinical decision support, not final diagnosis.
 """.strip()
 
 
@@ -369,7 +455,7 @@ def _openai_compatible_chat(messages: List[Dict[str, str]]) -> Dict[str, Any]:
         "model": model,
         "messages": messages,
         "temperature": _safe_float(os.getenv("CXR_AGENT_LLM_TEMPERATURE"), 0.1),
-        "max_tokens": int(_safe_float(os.getenv("CXR_AGENT_LLM_MAX_TOKENS"), 420)),
+        "max_tokens": _env_int("CXR_AGENT_LLM_MAX_TOKENS", 900),
     }
     req = urllib.request.Request(
         endpoint,
@@ -377,7 +463,7 @@ def _openai_compatible_chat(messages: List[Dict[str, str]]) -> Dict[str, Any]:
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    timeout = int(_safe_float(os.getenv("CXR_AGENT_LLM_TIMEOUT"), 20))
+    timeout = _env_int("CXR_AGENT_LLM_TIMEOUT", 75)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     answer = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
@@ -394,7 +480,9 @@ def _case_line(case: Mapping[str, Any]) -> str:
     prob = _safe_float(case.get("top_probability"))
     triage = _as_dict(case.get("triage_assessment"))
     quality = _as_dict(case.get("quality_check"))
-    return f"- {idx}. {filename}: {top_kr}({top}) {prob:.1%}, triage={triage.get('triage_label_kr','-')}, 품질={quality.get('quality_grade','-')}"
+    triage_label = _clean_missing(triage.get("triage_label_kr"), "미생성")
+    quality_grade = _clean_missing(quality.get("quality_grade"), "미생성")
+    return f"- {idx}. {filename}: {top_kr}({top}) {prob:.1%}, triage={triage_label}, 품질={quality_grade}"
 
 
 
@@ -561,6 +649,37 @@ def _top_probability_lines(case: Mapping[str, Any], limit: int = 4) -> List[str]
     return lines
 
 
+def _case_quality_comment(case: Mapping[str, Any]) -> List[str]:
+    quality = _as_dict(case.get("quality_check"))
+    grade = quality.get("quality_grade")
+    score = quality.get("quality_score")
+    flags = list(quality.get("flags") or [])
+    if grade or score or flags:
+        pieces = [f"등급 {grade}" if grade else "등급 미기록", f"점수 {score}/100" if score is not None else "점수 미기록"]
+        if flags:
+            pieces.append("; ".join(map(str, flags[:3])))
+        return ["- 품질 tool 관찰: " + " · ".join(pieces)]
+    return [
+        "- 품질 tool 관찰: 현재 chat context에 품질 등급/점수가 없습니다.",
+        "- 재촬영 판단: 이 정보만으로는 재촬영 필요성을 단정할 수 없습니다. 원본 영상에서 회전, 흡기 부족, 저노출/과노출, motion blur, scapula overlap, 전체 폐야 포함 여부를 확인해야 합니다.",
+    ]
+
+
+def _synth_report_from_case(case: Mapping[str, Any]) -> Dict[str, str]:
+    findings = str(case.get("findings_kr") or "").strip()
+    impression = str(case.get("impression_kr") or "").strip()
+    if findings or impression:
+        return {"findings": findings or "제공된 Findings 초안 없음", "impression": impression or "제공된 Impression 초안 없음"}
+    top = case.get("top_disease") or "-"
+    top_kr = case.get("top_disease_kr") or DISEASE_KR.get(str(top), str(top))
+    prob = _safe_float(case.get("top_probability"))
+    top_probs = "; ".join(_top_probability_lines(case, limit=4)) or "상위 확률 정보 없음"
+    return {
+        "findings": f"AI 분류 결과 {top_kr}({top}) 가능성이 가장 높게 산출되었습니다({prob:.1%}). 함께 확인할 상위 예측은 {top_probs}입니다.",
+        "impression": f"{top_kr} 가능성을 우선 검토하십시오. 이는 모델 확률 기반 초안이며 원본 영상과 임상 정보로 확정해야 합니다.",
+    }
+
+
 def _format_focus_rois(case: Mapping[str, Any], limit: int = 3) -> List[str]:
     anatomy = _as_dict(case.get("anatomy_assessment"))
     rois = []
@@ -664,13 +783,12 @@ def fallback_agent_reply(question: str, compact_result: Mapping[str, Any], *, in
         comparison = _as_dict(summary.get("comparison"))
         lines.append(_answer_all_case_comparison(cases, comparison))
     elif any(k in question_l for k in ["품질", "화질", "흐림", "quality", "재촬영"]):
-        lines.append("영상 품질 점검 결과입니다.")
+        lines.append("영상 품질과 재촬영 필요성 검토입니다.")
+        lines.append("현재 답변은 CXR-CAD tool context에 남아 있는 품질 관찰값만 사용합니다. 품질 tool 출력이 비어 있으면 재촬영 여부는 단정하지 않습니다.")
         for case in _select_cases(question, cases):
-            quality = _as_dict(case.get("quality_check"))
-            flags = quality.get("flags") or []
-            lines.append(_case_line(case))
-            if flags:
-                lines.append("  · " + "; ".join(map(str, flags[:3])))
+            lines.append(f"\n{case.get('index')}. {case.get('filename')}")
+            lines.append(f"- 분류 참고: {case.get('top_disease_kr') or DISEASE_KR.get(str(case.get('top_disease')), str(case.get('top_disease')))} {_safe_float(case.get('top_probability')):.1%}")
+            lines.extend(_case_quality_comment(case))
     elif _is_gradcam_question(question_l):
         if _is_gradcam_availability_question(question_l):
             lines.append(_answer_gradcam_availability(_select_cases(question, cases)))
@@ -679,9 +797,10 @@ def fallback_agent_reply(question: str, compact_result: Mapping[str, Any], *, in
     elif any(k in question_l for k in ["우선", "먼저", "응급", "위험", "주의", "의료인", "의료진", "triage", "priority"]):
         lines.append(_answer_case_review_priority(question, cases, gradcam_context=False))
     elif any(k in question_l for k in ["판독", "초안", "소견", "report", "draft"]):
-        lines.append("이미지별 판독 초안 요약입니다.")
+        lines.append("이미지별 판독문 초안입니다. 제공된 report tool 출력이 비어 있으면 classifier 결과를 근거로 보수적으로 합성했습니다.")
         for case in _select_cases(question, cases):
-            lines.append(f"\n{case.get('index')}. {case.get('filename')}\n- Findings: {case.get('findings_kr') or '-'}\n- Impression: {case.get('impression_kr') or '-'}")
+            report = _synth_report_from_case(case)
+            lines.append(f"\n{case.get('index')}. {case.get('filename')}\n- Findings: {report['findings']}\n- Impression: {report['impression']}")
     elif any(k in question_l for k in ["roi", "해부학", "위치", "어디", "location"]):
         lines.append("해부학 ROI 스캐폴드 기준 검토 순서입니다. 이는 학습된 segmentation mask가 아니라 검토 보조 위치입니다.")
         for case in _select_cases(question, cases):
@@ -715,49 +834,151 @@ def _fastpath_supported(question: str) -> bool:
 
 
 
-def _plan_chat_context_tools(question: str, compact_result: Mapping[str, Any]) -> Dict[str, Any]:
-    """Plan which already-computed CXR tool contexts should answer a follow-up.
-
-    This is a lightweight chat-time analogue of the MedRAX tool loop: choose the
-    smallest relevant context tools instead of always handing every tool output
-    to the answer engine.
-    """
+def _rule_plan_chat_context_tools(question: str, compact_result: Mapping[str, Any]) -> Dict[str, Any]:
+    """Deterministic backup planner for selected CXR tool contexts."""
     q = (question or "").lower()
     selected: List[str] = []
+    reasoning_steps: List[str] = []
 
-    def add(name: str) -> None:
+    def add(name: str, reason: str) -> None:
         if name not in selected:
             selected.append(name)
+            reasoning_steps.append(f"{name}: {reason}")
 
-    add("CXRClassifierTool")
+    add("CXRClassifierTool", "모든 답변에는 영상별 질환 확률과 Top 소견이 기본 근거로 필요합니다.")
     if any(k in q for k in ["비교", "변화", "악화", "호전", "compare", "change", "worse", "better"]):
-        add("ComparisonTool")
-    if any(k in q for k in ["품질", "화질", "흐림", "quality", "재촬영", "artifact"]):
-        add("QualityCheckTool")
+        add("ComparisonTool", "사용자가 여러 영상 간 변화/비교를 요청했습니다.")
+    if any(k in q for k in ["품질", "화질", "흐림", "quality", "재촬영", "artifact", "아티팩트"]):
+        add("QualityCheckTool", "사용자가 화질 또는 재촬영 필요성을 물었습니다.")
     if _is_gradcam_question(q):
-        add("GradCAMTool")
+        add("GradCAMTool", "사용자가 모델 근거/Grad-CAM/히트맵을 요청했습니다.")
         if not _is_gradcam_availability_question(q):
-            add("AnatomicalROITool")
-    if any(k in q for k in ["roi", "해부학", "위치", "어디", "location", "where"]):
-        add("AnatomicalROITool")
+            add("AnatomicalROITool", "Grad-CAM 근거 설명에는 해부학적 검토 위치가 함께 필요합니다.")
+    if any(k in q for k in ["roi", "해부학", "위치", "어디", "location", "where", "부위"]):
+        add("AnatomicalROITool", "사용자가 의심 위치 또는 해부학적 부위를 물었습니다.")
     if any(k in q for k in ["우선", "먼저", "응급", "긴급", "위험", "triage", "priority"]):
-        add("TriageTool")
-    if any(k in q for k in ["판독", "초안", "소견", "report", "draft", "findings", "impression"]):
-        add("ReportDraftTool")
+        add("TriageTool", "사용자가 우선순위/위험도를 물었습니다.")
+    if any(k in q for k in ["판독", "초안", "소견", "report", "draft", "findings", "impression", "요약"]):
+        add("ReportDraftTool", "사용자가 판독문 또는 소견 요약을 요청했습니다.")
     if any(label.lower() in q or kr.lower() in q for label, kr in DISEASE_KR.items()):
-        add("CXRClassifierTool")
+        add("CXRClassifierTool", "특정 질환 확률 질의이므로 classifier context를 사용합니다.")
 
+    case_count = len(compact_result.get("cases", []) or [])
+    if case_count > 1 and "ComparisonTool" not in selected and any(k in q for k in ["영상", "케이스", "묶음", "전체", "모두"]):
+        add("ComparisonTool", "여러 영상 묶음 전체를 묻고 있어 batch comparison context를 보조 근거로 사용합니다.")
     if len(selected) == 1:
-        # Open-ended questions need enough context for synthesis.
-        add("TriageTool")
-        add("ReportDraftTool")
+        add("TriageTool", "열린 질문에 대해 우선 검토 순위를 함께 제시하기 위해 사용합니다.")
+        add("ReportDraftTool", "열린 질문에 대해 판독문 형태의 요약을 보조 근거로 사용합니다.")
 
     return {
-        "planner_mode": "chat_context_tool_planner",
+        "planner_mode": "rule_planner",
         "planned_tools": selected,
+        "reasoning_steps": reasoning_steps,
+        "answer_style": "case_evidence_markdown",
+        "missing_context_policy": "state_unavailable_outputs_explicitly",
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "case_count": len(compact_result.get("cases", []) or []),
+        "case_count": case_count,
     }
+
+
+def _extract_json_object(text: str) -> Dict[str, Any]:
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+    if match:
+        try:
+            parsed = json.loads(match.group(0))
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _build_planner_prompt(question: str, compact_result: Mapping[str, Any]) -> List[Dict[str, str]]:
+    deterministic = _rule_plan_chat_context_tools(question, compact_result)
+    available = ", ".join(TOOL_CONTEXT_NAMES)
+    context = _build_context_text(compact_result)
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are a MedRAX-style tool planner for a CXR-CAD workbench. "
+                "Return JSON only. Choose the minimum useful tool contexts for the user's question. "
+                "Allowed tools: " + available + ". "
+                "Do not invent tools. Prefer explicit missing-context handling over fabricated findings."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Question: {question.strip()}\n\n"
+                f"Rule planner seed: {json.dumps(deterministic, ensure_ascii=False)}\n\n"
+                f"Compact context preview:\n{context[:4500]}\n\n"
+                "Return JSON with keys: planned_tools (array), reasoning_steps (array of short Korean strings), "
+                "answer_style (string), missing_context_policy (string)."
+            ),
+        },
+    ]
+
+
+def _normalize_plan(plan: Mapping[str, Any], fallback: Mapping[str, Any], mode: str) -> Dict[str, Any]:
+    fallback_tools = list(fallback.get("planned_tools") or [])
+    raw_tools = plan.get("planned_tools") if isinstance(plan, Mapping) else []
+    selected: List[str] = []
+    for item in list(raw_tools or []):
+        name = str(item).strip()
+        if name in TOOL_CONTEXT_NAMES and name not in selected:
+            selected.append(name)
+    if "CXRClassifierTool" not in selected:
+        selected.insert(0, "CXRClassifierTool")
+    for name in fallback_tools:
+        # Keep deterministic safety tools when the LLM planner returns too little.
+        if name in {"QualityCheckTool", "GradCAMTool", "AnatomicalROITool", "ComparisonTool", "ReportDraftTool", "TriageTool"} and name not in selected:
+            selected.append(name)
+    if not selected:
+        selected = fallback_tools or ["CXRClassifierTool", "TriageTool", "ReportDraftTool"]
+
+    reasoning = plan.get("reasoning_steps") if isinstance(plan, Mapping) else None
+    if not isinstance(reasoning, list) or not reasoning:
+        reasoning = list(fallback.get("reasoning_steps") or [])
+    return {
+        "planner_mode": mode,
+        "planned_tools": selected,
+        "reasoning_steps": [str(x) for x in reasoning[:8]],
+        "answer_style": str(plan.get("answer_style") or fallback.get("answer_style") or "case_evidence_markdown"),
+        "missing_context_policy": str(plan.get("missing_context_policy") or fallback.get("missing_context_policy") or "state_unavailable_outputs_explicitly"),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "case_count": fallback.get("case_count"),
+    }
+
+
+def _plan_chat_context_tools(question: str, compact_result: Mapping[str, Any]) -> Dict[str, Any]:
+    """Plan which CXR tool contexts should answer a follow-up.
+
+    LLM planning is enabled by default when an OpenAI-compatible endpoint is
+    configured. The deterministic planner remains as the safe fallback.
+    """
+    fallback = _rule_plan_chat_context_tools(question, compact_result)
+    if not (_env_bool("CXR_AGENT_LLM_PLANNER_ENABLED", True) and _env_bool("CXR_AGENT_LLM_ENABLED", True) and _llm_configured()):
+        return dict(fallback)
+    try:
+        llm_plan_text = _openai_compatible_chat(_build_planner_prompt(question, compact_result))["answer"]
+        parsed = _extract_json_object(llm_plan_text)
+        normalized = _normalize_plan(parsed, fallback, "llm_planner_openai_compatible")
+        normalized["raw_llm_plan"] = _truncate_text(llm_plan_text, 1200)
+        return normalized
+    except Exception as exc:
+        recovered = dict(fallback)
+        recovered["planner_mode"] = "rule_planner_after_llm_planner_error"
+        recovered["planner_error"] = str(exc)
+        return recovered
 
 
 def _chat_tool_trace(planned_tools: Sequence[str], compact_result: Mapping[str, Any]) -> List[Dict[str, Any]]:
@@ -806,24 +1027,93 @@ def _chat_tool_trace(planned_tools: Sequence[str], compact_result: Mapping[str, 
         )
     return trace
 
+def _build_answer_messages(
+    question: str,
+    compact_result: Mapping[str, Any],
+    history: Sequence[Mapping[str, str]],
+    plan: Mapping[str, Any],
+    trace: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, str]]:
+    context_text = _build_context_text(compact_result)
+    plan_text = json.dumps(
+        {
+            "planner_mode": plan.get("planner_mode"),
+            "planned_tools": plan.get("planned_tools"),
+            "reasoning_steps": plan.get("reasoning_steps"),
+            "missing_context_policy": plan.get("missing_context_policy"),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    trace_text = json.dumps(list(trace or [])[:10], ensure_ascii=False, default=str)[:6500]
+    messages: List[Dict[str, str]] = [{"role": "system", "content": _system_prompt()}]
+    messages.extend(_history_to_messages(history, limit=6))
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                "[Agent planner output]\n"
+                f"{plan_text}\n\n"
+                "[Selected tool observations]\n"
+                f"{trace_text}\n\n"
+                "[Full compact CXR-CAD context]\n"
+                f"{context_text}\n\n"
+                "[User question]\n"
+                f"{question.strip()}\n\n"
+                "답변 형식: 한국어 markdown. 너무 짧게 끝내지 말고, 케이스별 근거와 '현재 컨텍스트에서 부족한 점'을 명확히 구분하세요. "
+                "질문이 화질/재촬영이면 품질 tool output이 없을 때 '판정 불가'와 재촬영 판단 체크리스트를 제시하세요. "
+                "질문이 판독문 초안이면 Findings/Impression을 새로 간결하게 합성하되, 지원되지 않는 소견은 만들지 마세요."
+            ),
+        }
+    )
+    return messages
+
+
+def _fallback_payload(
+    *,
+    question: str,
+    compact: Mapping[str, Any],
+    planned_tools: Sequence[str],
+    chat_trace: Sequence[Mapping[str, Any]],
+    chat_plan: Mapping[str, Any],
+    error: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "answer": fallback_agent_reply(question, compact),
+        "engine": "local_grounded_fallback",
+        "model": None,
+        "fallback": True,
+        "error": error,
+        "used_context_tools": list(planned_tools),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "usage": {},
+        "safety_note": compact.get("safety_note") or "최종 진단이 아니며 의료진 검토가 필요합니다.",
+        "tool_trace": list(chat_trace),
+        "agent_plan": [dict(chat_plan)],
+    }
+
+
 def generate_llm_agent_reply(
     *,
     question: str,
     agent_result: Mapping[str, Any],
     history: Optional[Sequence[Mapping[str, str]]] = None,
 ) -> Dict[str, Any]:
-    """Generate a MedRAX-style answer using an LLM over CXR tool context."""
-    question = (question or "").strip()
+    """Generate a MedRAX-style follow-up answer with LLM-first planning.
+
+    The previous implementation returned deterministic fastpath strings for
+    many common questions. For demo and agentic UX, the default is now:
+    planner -> context-tool trace -> LLM synthesis. Set
+    CXR_AGENT_TOOL_FIRST_FASTPATH=1 only when you explicitly want the old faster
+    local behavior.
+    """
+    question = (question or "").strip() or "이 케이스 묶음의 핵심 우선순위를 간단히 정리해줘."
     compact = compact_agent_result(agent_result)
-    if not question:
-        question = "이 케이스 묶음의 핵심 우선순위를 간단히 정리해줘."
     chat_plan = _plan_chat_context_tools(question, compact)
     planned_tools = list(chat_plan.get("planned_tools") or [])
     chat_trace = _chat_tool_trace(planned_tools, compact)
 
-    # MedRAX-like fast path: answer tool-specific questions from the selected
-    # tool context instead of calling the LLM again.
-    if _env_bool("CXR_AGENT_TOOL_FIRST_FASTPATH", True) and _fastpath_supported(question):
+    if (not _env_bool("CXR_AGENT_LLM_FIRST", True)) and _env_bool("CXR_AGENT_TOOL_FIRST_FASTPATH", False) and _fastpath_supported(question):
         return {
             "answer": fallback_agent_reply(question, compact, include_notice=False),
             "engine": "tool_context_fastpath",
@@ -837,46 +1127,37 @@ def generate_llm_agent_reply(
             "agent_plan": [chat_plan],
         }
 
-    if _env_bool("CXR_AGENT_LLM_ENABLED", True):
-        try:
-            llm_messages = _build_llm_messages(question, compact, history or [])
-            llm = _openai_compatible_chat(llm_messages)
-            return {
-                "answer": llm["answer"],
-                "engine": "llm_openai_compatible_compact",
-                "model": llm.get("model"),
-                "fallback": False,
-                "used_context_tools": planned_tools,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "usage": llm.get("raw_usage") or {},
-                "safety_note": compact.get("safety_note") or "최종 진단이 아니며 의료진 검토가 필요합니다.",
-                "tool_trace": chat_trace,
-                "agent_plan": [chat_plan],
-            }
-        except Exception as exc:
-            return {
-                "answer": fallback_agent_reply(question, compact),
-                "engine": "local_grounded_fallback",
-                "model": None,
-                "fallback": True,
-                "error": str(exc),
-                "used_context_tools": planned_tools,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "usage": {},
-                "safety_note": compact.get("safety_note") or "최종 진단이 아니며 의료진 검토가 필요합니다.",
-                "tool_trace": chat_trace,
-                "agent_plan": [chat_plan],
-            }
+    if not (_env_bool("CXR_AGENT_LLM_ENABLED", True) and _llm_configured()):
+        return _fallback_payload(
+            question=question,
+            compact=compact,
+            planned_tools=planned_tools,
+            chat_trace=chat_trace,
+            chat_plan=chat_plan,
+            error="LLM endpoint is not configured. Set OPENAI_API_KEY or CXR_AGENT_LLM_API_KEY.",
+        )
 
-    return {
-        "answer": fallback_agent_reply(question, compact),
-        "engine": "local_grounded_fallback",
-        "model": None,
-        "fallback": True,
-        "used_context_tools": planned_tools,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "usage": {},
-        "safety_note": compact.get("safety_note") or "최종 진단이 아니며 의료진 검토가 필요합니다.",
-        "tool_trace": chat_trace,
-        "agent_plan": [chat_plan],
-    }
+    try:
+        answer_messages = _build_answer_messages(question, compact, history or [], chat_plan, chat_trace)
+        llm = _openai_compatible_chat(answer_messages)
+        return {
+            "answer": llm["answer"],
+            "engine": "llm_planner_tool_synthesis",
+            "model": llm.get("model"),
+            "fallback": False,
+            "used_context_tools": planned_tools,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "usage": llm.get("raw_usage") or {},
+            "safety_note": compact.get("safety_note") or "최종 진단이 아니며 의료진 검토가 필요합니다.",
+            "tool_trace": chat_trace,
+            "agent_plan": [chat_plan],
+        }
+    except Exception as exc:
+        return _fallback_payload(
+            question=question,
+            compact=compact,
+            planned_tools=planned_tools,
+            chat_trace=chat_trace,
+            chat_plan=chat_plan,
+            error=str(exc),
+        )
