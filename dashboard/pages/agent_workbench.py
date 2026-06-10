@@ -126,6 +126,10 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .chat-body { font-size:0.89rem; line-height:1.58; white-space:pre-wrap; }
 .chat-hint { border-radius:18px; padding:0.8rem 0.95rem; background:rgba(219,234,254,0.78); border:1px solid rgba(96,165,250,0.25); color:#1e293b !important; font-size:0.82rem; line-height:1.48; }
 .small-muted { color:#64748b !important; font-size:0.78rem; line-height:1.45; }
+.agent-console { border-radius:22px; padding:1rem 1.1rem; background:linear-gradient(135deg,#0f172a,#12345f); color:#e0f2fe !important; border:1px solid rgba(125,211,252,0.30); box-shadow:0 18px 42px rgba(15,23,42,0.16); margin:0.8rem 0 1rem; }
+.agent-console h4 { margin:0 0 0.45rem; color:#ffffff !important; font-weight:900; }
+.tool-chip { display:inline-flex; align-items:center; gap:0.25rem; padding:0.26rem 0.58rem; border-radius:999px; margin:0.12rem; background:rgba(219,234,254,0.13); border:1px solid rgba(125,211,252,0.25); color:#dbeafe !important; font-size:0.75rem; font-weight:800; }
+.trace-note { color:#bae6fd !important; font-size:0.8rem; line-height:1.45; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -253,19 +257,34 @@ def compact_chat_result_payload(result: dict) -> dict:
     }
 
 
+def _is_compact_chat_payload(result: dict) -> bool:
+    """True when the payload is already stripped for /agent/chat.
+
+    Re-compacting an already compact payload drops quality/triage/report fields
+    because there is no nested `prediction` or `agent_profile` left. That was
+    the main reason follow-up answers showed 품질=None or Findings=-.
+    """
+    cases = (result or {}).get("cases") or []
+    if not isinstance(cases, list) or not cases:
+        return False
+    first = cases[0] if isinstance(cases[0], dict) else {}
+    return "prediction" not in first and any(k in first for k in ["quality_check", "triage_assessment", "report_draft", "top_probabilities"])
+
+
 def call_agent_chat_api(question: str, result: dict, history: List[Dict[str, str]]) -> dict | None:
     """Send a follow-up question to the backend LLM agent.
 
     The UI keeps the same chat bubbles/input, while the answer engine moves to
     the MedRAX-like backend path: LLM brain over existing CXR-CAD tool outputs.
     """
+    chat_context = result if _is_compact_chat_payload(result) else compact_chat_result_payload(result)
     payload = {
         "question": question.strip(),
-        "result": compact_chat_result_payload(result),
+        "result": chat_context,
         "history": history[-6:],
     }
     try:
-        resp = requests.post(f"{API_URL}/agent/chat", json=payload, timeout=35)
+        resp = requests.post(f"{API_URL}/agent/chat", json=payload, timeout=140)
         if resp.status_code == 200:
             return resp.json()
         st.error(f"Agent Chat API 오류 {resp.status_code}: {resp.text}")
@@ -295,6 +314,17 @@ def check_api_health() -> dict | None:
     except Exception:
         return None
     return None
+
+def check_agent_status() -> dict | None:
+    """Read backend LLM-agent runtime mode without exposing secrets."""
+    try:
+        r = requests.get(f"{API_URL}/agent/status", timeout=3)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        return None
+    return None
+
 
 
 def get_gradcam_risk_color(prob: float, threshold: float) -> str:
@@ -711,11 +741,153 @@ def render_chat_messages(messages: List[Dict[str, str]]) -> None:
     st.markdown("".join(html_parts), unsafe_allow_html=True)
 
 
+def _tool_chips(tool_names: List[str]) -> str:
+    if not tool_names:
+        return "<span class='tool-chip'>No tool trace</span>"
+    return " ".join(f"<span class='tool-chip'>✓ {escape(str(name))}</span>" for name in tool_names)
+
+
+def _latest_agent_meta(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    for msg in reversed(messages or []):
+        if msg.get("role") in {"agent", "assistant"} and isinstance(msg.get("meta"), dict):
+            return msg.get("meta") or {}
+    return {}
+
+
+def render_latest_agent_trace(messages: List[Dict[str, Any]]) -> None:
+    """Show the MedRAX-like planner/tool trace for the latest chat answer."""
+    meta = _latest_agent_meta(messages)
+    if not meta:
+        return
+
+    used_tools = list(meta.get("used_context_tools") or [])
+    engine = meta.get("engine", "-")
+    model = meta.get("model") or "local fallback"
+    fallback = "YES" if meta.get("fallback") else "NO"
+    st.markdown(
+        f"""
+<div class="agent-console">
+  <h4>🧠 Latest Agent Reasoning Console</h4>
+  <div class="trace-note">Engine: <b>{escape(str(engine))}</b> · Model: <b>{escape(str(model))}</b> · Fallback: <b>{fallback}</b></div>
+  <div style="margin-top:0.55rem;">{_tool_chips(used_tools)}</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("Planner / Tool trace 자세히 보기", expanded=False):
+        plan = meta.get("agent_plan") or []
+        if plan:
+            plan0 = plan[0] if isinstance(plan, list) else plan
+            st.markdown("**Planner reasoning**")
+            for step in (plan0.get("reasoning_steps") or [])[:8]:
+                st.caption(f"• {step}")
+            st.json(plan0, expanded=False)
+        trace = meta.get("tool_trace") or []
+        if trace:
+            rows = []
+            for item in trace:
+                rows.append({
+                    "iteration": item.get("iteration"),
+                    "tool": item.get("name"),
+                    "scope": item.get("scope"),
+                    "status": item.get("status"),
+                    "rationale": _short_text(item.get("rationale"), 180),
+                })
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        if meta.get("error"):
+            st.warning(f"LLM fallback reason: {meta.get('error')}")
+
+
+def render_agent_execution_console(result: dict) -> None:
+    """Expose the analysis-time dynamic agent trace for demo visibility."""
+    trace = list(result.get("tool_trace") or [])
+    plan = list(result.get("agent_plan") or [])
+    tool_names: List[str] = []
+    for item in trace:
+        name = item.get("name")
+        if name and name not in tool_names:
+            tool_names.append(str(name))
+
+    st.markdown(
+        f"""
+<div class="agent-console">
+  <h4>🔁 Dynamic Agent Flow</h4>
+  <div class="trace-note">초기 분석에서 실제 선택·실행된 tool sequence입니다. 고정 파이프라인이 아니라 planner가 질문/상태에 따라 tool을 고릅니다.</div>
+  <div style="margin-top:0.55rem;">{_tool_chips(tool_names)}</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    with st.expander("초기 분석 planner / tool 실행 로그", expanded=False):
+        if trace:
+            rows = []
+            for item in trace:
+                rows.append({
+                    "scope": item.get("scope", "case"),
+                    "file": item.get("filename", "batch"),
+                    "iteration": item.get("iteration"),
+                    "tool": item.get("name"),
+                    "status": item.get("status"),
+                    "duration_ms": item.get("duration_ms"),
+                    "rationale": _short_text(item.get("rationale"), 220),
+                })
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        else:
+            st.info("tool_trace가 비어 있습니다. 백엔드가 최신 agentic 버전인지 확인하세요.")
+        if plan:
+            st.markdown("**Raw agent plan**")
+            st.json(plan[:10], expanded=False)
+
+
 def _rerun() -> None:
     if hasattr(st, "rerun"):
         st.rerun()
     elif hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
+
+
+def submit_agent_followup(followup: str, result: dict) -> None:
+    """Send a follow-up through the backend LLM agent and append UI metadata.
+
+    The UI intentionally avoids silently substituting the old Streamlit
+    hard-coded answer templates. If the backend fails, the user sees that the
+    MedRAX-style agent path failed instead of a deceptively fluent fallback.
+    """
+    followup = (followup or "").strip()
+    if not followup:
+        st.warning("질문을 입력한 뒤 전송하세요.")
+        return
+
+    user_message = {"role": "user", "content": followup}
+    prior_history = list(st.session_state.get("agent_chat_messages", []))
+    st.session_state["agent_chat_messages"].append(user_message)
+    with st.spinner("LLM Agent가 planner → tool context → answer synthesis 순서로 답변 중입니다..."):
+        chat_context = st.session_state.get("agent_chat_context") or compact_chat_result_payload(result)
+        chat_response = call_agent_chat_api(followup, chat_context, prior_history + [user_message])
+
+    if chat_response and chat_response.get("answer"):
+        answer = str(chat_response.get("answer"))
+        agent_meta: Dict[str, Any] = chat_response
+        if chat_response.get("fallback"):
+            answer += (
+                "\n\n⚠️ 현재 답변은 LLM 합성이 아니라 local grounded fallback입니다. "
+                "대회 시연에서는 백엔드 환경변수 `OPENAI_API_KEY` 또는 `CXR_AGENT_LLM_API_KEY`를 설정해야 "
+                "planner + LLM synthesis가 실제로 활성화됩니다."
+            )
+            if chat_response.get("error"):
+                answer += f"\nFallback reason: {chat_response.get('error')}"
+    else:
+        answer = (
+            "백엔드 MedRAX-style Agent 응답을 받지 못했습니다. "
+            "FastAPI 로그와 `/agent/status`의 LLM 설정 상태를 확인하세요. "
+            "이 화면은 더 이상 예전 하드코딩 답변으로 조용히 대체하지 않습니다."
+        )
+        agent_meta = {"engine": "backend_agent_unavailable", "fallback": True, "used_context_tools": [], "error": "No /agent/chat answer"}
+
+    st.session_state["agent_chat_messages"].append({"role": "agent", "content": answer, "meta": agent_meta})
+    st.session_state["agent_chat_nonce"] += 1
+    _rerun()
 
 
 def _install_enter_submit_hotkey() -> None:
@@ -771,11 +943,29 @@ def render_agent_chat(result: dict) -> None:
     st.session_state.setdefault("agent_chat_messages", [])
     st.session_state.setdefault("agent_chat_nonce", 0)
     render_chat_messages(st.session_state["agent_chat_messages"])
+    render_latest_agent_trace(st.session_state["agent_chat_messages"])
 
+    st.markdown("**시연용 질문 예시**: `화질과 재촬영 필요성만 봐줘` · `Grad-CAM 근거와 의심 부위를 설명해줘` · `세 장 중 가장 먼저 볼 영상을 골라줘` · `판독문 초안을 Findings/Impression으로 다시 써줘`")
+
+    st.markdown("**One-click demo prompts**")
+    qcols = st.columns(4)
+    demo_prompts = [
+        "화질과 재촬영 필요성만 봐줘. 케이스별로 판정 가능/불가능을 구분해줘",
+        "Grad-CAM 근거와 의심 부위를 케이스별로 설명해줘",
+        "가장 위험한 영상부터 우선순위를 매기고 이유를 설명해줘",
+        "판독문 초안을 Findings / Impression 형식으로 새로 써줘",
+    ]
+    for col, prompt in zip(qcols, demo_prompts):
+        with col:
+            if st.button(prompt.split(".")[0], key=f"demo_prompt_{abs(hash(prompt))}", use_container_width=True):
+                submit_agent_followup(prompt, result)
+
+    prefill = st.session_state.pop("agent_followup_prefill", "") if "agent_followup_prefill" in st.session_state else ""
     with st.form("agent_followup_form", clear_on_submit=False):
         input_key = f"agent_followup_input_{st.session_state['agent_chat_nonce']}"
         followup = st.text_area(
             "Agent에게 후속 질문",
+            value=prefill,
             placeholder="예: 폐렴 의심 영상만 정리해줘. / 첫 번째와 마지막 영상을 비교해줘. / 어떤 영상을 먼저 봐야 해? / 품질 문제 있는 파일 있어?",
             height=135,
             key=input_key,
@@ -793,24 +983,7 @@ def render_agent_chat(result: dict) -> None:
         st.session_state["agent_chat_nonce"] += 1
         _rerun()
     if send:
-        if followup.strip():
-            user_message = {"role": "user", "content": followup.strip()}
-            prior_history = list(st.session_state.get("agent_chat_messages", []))
-            st.session_state["agent_chat_messages"].append(user_message)
-            with st.spinner("LLM Agent가 CXR-CAD tool context를 바탕으로 답변 중입니다..."):
-                chat_context = st.session_state.get("agent_chat_context") or compact_chat_result_payload(result)
-                chat_response = call_agent_chat_api(followup, chat_context, prior_history + [user_message])
-            if chat_response and chat_response.get("answer"):
-                answer = str(chat_response.get("answer"))
-                if chat_response.get("fallback") and chat_response.get("error"):
-                    answer += f"\n\n[LLM fallback 사유] {chat_response.get('error')}"
-            else:
-                answer = build_agent_reply(followup, result)
-            st.session_state["agent_chat_messages"].append({"role": "agent", "content": answer})
-            st.session_state["agent_chat_nonce"] += 1
-            _rerun()
-        else:
-            st.warning("질문을 입력한 뒤 전송하세요.")
+        submit_agent_followup(followup, result)
 
 
 with st.sidebar:
@@ -820,6 +993,12 @@ with st.sidebar:
     if health:
         loaded = health.get("loaded_models", [])
         st.success(f"FastAPI 연결 · 로드 모델 {len(loaded)}개")
+        agent_status = check_agent_status() or {}
+        if agent_status.get("llm_configured") and agent_status.get("llm_enabled"):
+            st.success(f"LLM Agent ON · {agent_status.get('model', '-')}")
+        else:
+            st.warning("LLM Agent OFF · local fallback")
+            st.caption("대회 시연 전 FastAPI 환경에 OPENAI_API_KEY 또는 CXR_AGENT_LLM_API_KEY를 설정하세요.")
     else:
         st.error("FastAPI 미연결")
     st.divider()
@@ -838,6 +1017,8 @@ st.markdown(
     </p>
     <span class="agent-pill">Multi-image upload</span>
     <span class="agent-pill">DICOM-aware routing</span>
+    <span class="agent-pill">LLM-first planner</span>
+    <span class="agent-pill">Tool trace console</span>
     <span class="agent-pill">Interactive chat</span>
     <span class="agent-pill">Per-case draft & feedback</span>
     <span class="agent-pill">Follow-up comparison</span>
@@ -861,17 +1042,34 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True,
     help="동일 환자의 과거/현재 영상 또는 여러 케이스를 한 번에 넣어 이미지별 초안과 비교 요약을 생성합니다.",
 )
-question = ""
+question = st.text_input(
+    "초기 Agent 목표 / 시연 질문",
+    value="",
+    placeholder="예: 화질과 재촬영 필요성을 우선 평가해줘 / Grad-CAM 근거 중심으로 설명해줘 / 가장 위험한 영상부터 정리해줘",
+    help="비워두면 기본 full workup을 실행합니다. 입력하면 MedRAX식 planner가 질문 의도에 맞는 도구를 우선 선택합니다.",
+)
 
 run = st.button("Agent 분석 실행", type="primary", use_container_width=True, disabled=not uploaded_files or not health)
 if run:
-    with st.spinner("Agent가 입력 라우팅 → 모델 추론 → 판독 초안 → 품질 점검 → ROI 스캐폴드 → 비교 요약을 실행 중입니다..."):
+    with st.spinner("Agent planner가 목표를 해석하고 필요한 CXR tool을 선택·실행 중입니다..."):
         result_payload = call_agent_api(uploaded_files, model_key, threshold, question)
         st.session_state["agent_result"] = result_payload
         st.session_state["agent_uploaded_lookup"] = {f.name: f.getvalue() for f in uploaded_files}
         if result_payload:
-            st.session_state["agent_chat_context"] = compact_chat_result_payload(result_payload)
-            st.session_state["agent_chat_messages"] = build_initial_chat(result_payload, question)
+            chat_context = compact_chat_result_payload(result_payload)
+            st.session_state["agent_chat_context"] = chat_context
+            if question.strip():
+                user_msg = {"role": "user", "content": question.strip()}
+                initial_chat = call_agent_chat_api(question, chat_context, [user_msg])
+                if initial_chat and initial_chat.get("answer"):
+                    answer = str(initial_chat.get("answer"))
+                    if initial_chat.get("fallback") and initial_chat.get("error"):
+                        answer += f"\n\n[LLM fallback 사유] {initial_chat.get('error')}"
+                    st.session_state["agent_chat_messages"] = [user_msg, {"role": "agent", "content": answer, "meta": initial_chat}]
+                else:
+                    st.session_state["agent_chat_messages"] = build_initial_chat(result_payload, question)
+            else:
+                st.session_state["agent_chat_messages"] = build_initial_chat(result_payload, question)
             st.session_state["agent_chat_nonce"] = st.session_state.get("agent_chat_nonce", 0) + 1
 
 result = st.session_state.get("agent_result")
@@ -915,6 +1113,8 @@ else:
         st.markdown(f"<div class='metric-card'><div class='value'>{comparison_on}</div><div class='label'>비교 분석</div></div>", unsafe_allow_html=True)
     with m4:
         st.markdown(f"<div class='metric-card'><div class='value'>{result.get('model_key', '-')}</div><div class='label'>모델</div></div>", unsafe_allow_html=True)
+
+    render_agent_execution_console(result)
 
     st.markdown('<div class="section-title">전체 영상 동시 분석</div>', unsafe_allow_html=True)
     st.markdown(
