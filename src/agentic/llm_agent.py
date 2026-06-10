@@ -714,6 +714,98 @@ def _fastpath_supported(question: str) -> bool:
     return any(label.lower() in q or kr.lower() in q for label, kr in DISEASE_KR.items())
 
 
+
+def _plan_chat_context_tools(question: str, compact_result: Mapping[str, Any]) -> Dict[str, Any]:
+    """Plan which already-computed CXR tool contexts should answer a follow-up.
+
+    This is a lightweight chat-time analogue of the MedRAX tool loop: choose the
+    smallest relevant context tools instead of always handing every tool output
+    to the answer engine.
+    """
+    q = (question or "").lower()
+    selected: List[str] = []
+
+    def add(name: str) -> None:
+        if name not in selected:
+            selected.append(name)
+
+    add("CXRClassifierTool")
+    if any(k in q for k in ["비교", "변화", "악화", "호전", "compare", "change", "worse", "better"]):
+        add("ComparisonTool")
+    if any(k in q for k in ["품질", "화질", "흐림", "quality", "재촬영", "artifact"]):
+        add("QualityCheckTool")
+    if _is_gradcam_question(q):
+        add("GradCAMTool")
+        if not _is_gradcam_availability_question(q):
+            add("AnatomicalROITool")
+    if any(k in q for k in ["roi", "해부학", "위치", "어디", "location", "where"]):
+        add("AnatomicalROITool")
+    if any(k in q for k in ["우선", "먼저", "응급", "긴급", "위험", "triage", "priority"]):
+        add("TriageTool")
+    if any(k in q for k in ["판독", "초안", "소견", "report", "draft", "findings", "impression"]):
+        add("ReportDraftTool")
+    if any(label.lower() in q or kr.lower() in q for label, kr in DISEASE_KR.items()):
+        add("CXRClassifierTool")
+
+    if len(selected) == 1:
+        # Open-ended questions need enough context for synthesis.
+        add("TriageTool")
+        add("ReportDraftTool")
+
+    return {
+        "planner_mode": "chat_context_tool_planner",
+        "planned_tools": selected,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "case_count": len(compact_result.get("cases", []) or []),
+    }
+
+
+def _chat_tool_trace(planned_tools: Sequence[str], compact_result: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    cases = list(compact_result.get("cases", []) or [])
+    summary = _as_dict(compact_result.get("agent_summary"))
+    trace: List[Dict[str, Any]] = []
+    for iteration, tool_name in enumerate(planned_tools, start=1):
+        output: Dict[str, Any]
+        if tool_name == "CXRClassifierTool":
+            output = {
+                "case_count": len(cases),
+                "top_cases": [
+                    {
+                        "index": c.get("index"),
+                        "filename": c.get("filename"),
+                        "top_disease": c.get("top_disease"),
+                        "top_probability": c.get("top_probability"),
+                    }
+                    for c in cases[:6]
+                ],
+            }
+        elif tool_name == "ComparisonTool":
+            output = _as_dict(summary.get("comparison"))
+        elif tool_name == "QualityCheckTool":
+            output = {"quality": [{"index": c.get("index"), "quality_check": c.get("quality_check")} for c in cases[:6]]}
+        elif tool_name == "GradCAMTool":
+            output = {"gradcam_available": [{"index": c.get("index"), "has_gradcam": c.get("has_gradcam")} for c in cases[:6]]}
+        elif tool_name == "AnatomicalROITool":
+            output = {"rois": [{"index": c.get("index"), "anatomy_assessment": c.get("anatomy_assessment")} for c in cases[:6]]}
+        elif tool_name == "TriageTool":
+            output = {"triage": [{"index": c.get("index"), "triage_assessment": c.get("triage_assessment")} for c in cases[:6]]}
+        elif tool_name == "ReportDraftTool":
+            output = {"reports": [{"index": c.get("index"), "report_draft": _truncate_text(c.get("report_draft"), 220)} for c in cases[:6]]}
+        else:
+            output = {"status": "selected"}
+        trace.append(
+            {
+                "iteration": iteration,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "name": tool_name,
+                "scope": "chat_context",
+                "status": "completed",
+                "rationale": "Selected by follow-up question intent and available /agent/analyze outputs.",
+                "output_summary": output,
+            }
+        )
+    return trace
+
 def generate_llm_agent_reply(
     *,
     question: str,
@@ -725,19 +817,24 @@ def generate_llm_agent_reply(
     compact = compact_agent_result(agent_result)
     if not question:
         question = "이 케이스 묶음의 핵심 우선순위를 간단히 정리해줘."
+    chat_plan = _plan_chat_context_tools(question, compact)
+    planned_tools = list(chat_plan.get("planned_tools") or [])
+    chat_trace = _chat_tool_trace(planned_tools, compact)
 
-    # MedRAX-like fast path: answer tool-specific questions from the already
-    # computed tool output instead of calling the LLM again.
+    # MedRAX-like fast path: answer tool-specific questions from the selected
+    # tool context instead of calling the LLM again.
     if _env_bool("CXR_AGENT_TOOL_FIRST_FASTPATH", True) and _fastpath_supported(question):
         return {
             "answer": fallback_agent_reply(question, compact, include_notice=False),
             "engine": "tool_context_fastpath",
             "model": "CXR-CAD runtime tools",
             "fallback": False,
-            "used_context_tools": TOOL_CONTEXT_NAMES,
+            "used_context_tools": planned_tools,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "usage": {"mode": "tool_first_fastpath"},
             "safety_note": compact.get("safety_note") or "최종 진단이 아니며 의료진 검토가 필요합니다.",
+            "tool_trace": chat_trace,
+            "agent_plan": [chat_plan],
         }
 
     if _env_bool("CXR_AGENT_LLM_ENABLED", True):
@@ -749,10 +846,12 @@ def generate_llm_agent_reply(
                 "engine": "llm_openai_compatible_compact",
                 "model": llm.get("model"),
                 "fallback": False,
-                "used_context_tools": TOOL_CONTEXT_NAMES,
+                "used_context_tools": planned_tools,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "usage": llm.get("raw_usage") or {},
                 "safety_note": compact.get("safety_note") or "최종 진단이 아니며 의료진 검토가 필요합니다.",
+                "tool_trace": chat_trace,
+                "agent_plan": [chat_plan],
             }
         except Exception as exc:
             return {
@@ -761,10 +860,12 @@ def generate_llm_agent_reply(
                 "model": None,
                 "fallback": True,
                 "error": str(exc),
-                "used_context_tools": TOOL_CONTEXT_NAMES,
+                "used_context_tools": planned_tools,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "usage": {},
                 "safety_note": compact.get("safety_note") or "최종 진단이 아니며 의료진 검토가 필요합니다.",
+                "tool_trace": chat_trace,
+                "agent_plan": [chat_plan],
             }
 
     return {
@@ -772,8 +873,10 @@ def generate_llm_agent_reply(
         "engine": "local_grounded_fallback",
         "model": None,
         "fallback": True,
-        "used_context_tools": TOOL_CONTEXT_NAMES,
+        "used_context_tools": planned_tools,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "usage": {},
         "safety_note": compact.get("safety_note") or "최종 진단이 아니며 의료진 검토가 필요합니다.",
+        "tool_trace": chat_trace,
+        "agent_plan": [chat_plan],
     }
