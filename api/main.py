@@ -52,7 +52,7 @@ from api.schemas import (
 )
 from src.preprocess.dicom_utils import dicom_to_pil, is_dicom, parse_dicom_metadata
 from src.preprocess.transforms import preprocess_single_image
-from src.agentic import build_agent_batch_summary, generate_llm_agent_reply
+from src.agentic import build_agent_batch_summary, generate_llm_agent_reply, get_agent_runtime_status
 from src.agentic.cxr_agent import analyze_image_quality, build_anatomy_assessment, build_triage_assessment
 from src.agentic.dynamic_agent import CXRCaseState, CXRRuntimeTool, DynamicBatchWorkflowAgent, DynamicCXRWorkflowAgent
 from src.train.models import (
@@ -471,6 +471,14 @@ async def list_models():
         else:
             info[key]["is_loaded"] = _model_registry.get(key) is not None
     return ModelInfoResponse(models=info)
+
+
+@app.get("/agent/status", tags=["Agentic Workflow"])
+async def agent_runtime_status():
+    """Expose non-secret LLM-agent runtime status for the Streamlit demo UI."""
+    status = get_agent_runtime_status()
+    status["loaded_cxr_models"] = [key for key, model in _model_registry.items() if model is not None]
+    return status
 
 
 def _parse_image_payload(contents: bytes, filename: str, content_type: Optional[str]) -> tuple[Image.Image, Dict[str, object], bool]:
