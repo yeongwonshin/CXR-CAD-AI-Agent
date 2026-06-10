@@ -25,13 +25,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-try:
-    from src.reliability.hidden_stratification import detect_hidden_strata
-except Exception as exc:  # pragma: no cover - dashboard fallback
-    detect_hidden_strata = None
-    IMPORT_ERROR = exc
-else:
-    IMPORT_ERROR = None
 
 st.set_page_config(
     page_title="CXR-CAD | Reliability Readiness",
@@ -579,20 +572,6 @@ def _gender_gap_pp(gender_df: pd.DataFrame) -> float:
     return float(gap.max() * 100.0)
 
 
-def _make_proxy_features(pred_df: pd.DataFrame) -> pd.DataFrame:
-    feature_parts = []
-    if "Patient Age" in pred_df.columns:
-        feature_parts.append(pd.to_numeric(pred_df["Patient Age"], errors="coerce").fillna(pred_df["Patient Age"].median()).rename("Patient Age"))
-    for col in ["Patient Gender", "View Position"]:
-        if col in pred_df.columns:
-            feature_parts.append(pd.get_dummies(pred_df[col].fillna("Unknown").astype(str), prefix=col))
-    prob_cols = [c for c in pred_df.columns if c.endswith("_prob")]
-    if prob_cols:
-        feature_parts.append(pred_df[prob_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0))
-    if not feature_parts:
-        return pd.DataFrame()
-    return pd.concat(feature_parts, axis=1)
-
 
 def _issue(dimension: str, severity: str, message: str, action: str) -> dict[str, str]:
     return {"dimension": dimension, "severity": severity, "message": message, "recommended_action": action}
@@ -615,13 +594,19 @@ def _adjustable_report(metrics: dict[str, Any], thresholds: dict[str, Any]) -> d
     shortcut = metrics.get("shortcut_ratio")
     if np.isfinite(shortcut) and shortcut >= thresholds["shortcut_warn"]:
         issues.append(_issue("localization", "warning", f"Shortcut pattern ratio={shortcut:.1%}", "shortcut-prone sample 정제 및 ROI 기반 검증 추가"))
-    hidden_count = metrics.get("hidden_flagged_count")
-    if hidden_count is not None and hidden_count > 0:
-        issues.append(_issue("hidden_stratification", "warning", f"{hidden_count} underperforming proxy strata detected", "cluster exemplar 확인 및 targeted validation slice 추가"))
 
-    has_critical = any(x["severity"] == "critical" for x in issues)
-    has_warning = any(x["severity"] == "warning" for x in issues)
-    status = "critical" if has_critical else "warning" if has_warning else "pass"
+    warning_count = sum(1 for x in issues if x["severity"] == "warning")
+    critical_count = sum(1 for x in issues if x["severity"] == "critical")
+    warning_trigger_count = int(thresholds.get("warning_issue_count", 1))
+    critical_warning_count = int(thresholds.get("critical_warning_count", 3))
+
+    if critical_count > 0 or warning_count >= critical_warning_count:
+        status = "critical"
+    elif warning_count >= warning_trigger_count:
+        status = "warning"
+    else:
+        status = "pass"
+
     return {
         "overall_status": status,
         "deployment_recommendation": {
@@ -630,8 +615,13 @@ def _adjustable_report(metrics: dict[str, Any], thresholds: dict[str, Any]) -> d
             "critical": "Block deployment until critical reliability issues are resolved.",
         }[status],
         "issues": issues,
+        "judgment_counts": {
+            "warning_count": warning_count,
+            "critical_count": critical_count,
+            "warning_trigger_count": warning_trigger_count,
+            "critical_warning_count": critical_warning_count,
+        },
     }
-
 
 def _finite(value: Any) -> bool:
     try:
@@ -677,7 +667,6 @@ def _issue_dimension_ko(dimension: str) -> str:
         "calibration": "확률 보정성",
         "domain_robustness": "도메인 변화 강건성",
         "localization": "판단 근거 위치 일관성",
-        "hidden_stratification": "숨은 취약군(hidden stratification)",
     }.get(dimension, dimension)
 
 
@@ -687,13 +676,20 @@ def _issue_severity_ko(severity: str) -> str:
 
 def _judgment_basis(report: dict[str, Any], metrics: dict[str, Any], thresholds: dict[str, Any]) -> list[str]:
     issues = report.get("issues", [])
+    counts = report.get("judgment_counts", {}) or {}
+    warning_count = counts.get("warning_count", 0)
+    critical_count = counts.get("critical_count", 0)
+    critical_warning_count = counts.get("critical_warning_count", 3)
     if not issues:
         return [
-            "현재 조절 기준에서 ECE, Youden's J, 외부기관 성능 하락, 하위집단 격차, shortcut 비율이 경고선을 넘지 않았습니다.",
-            "따라서 즉시 무제한 운영이 아니라, 정기 모니터링을 붙인 제한적 배치 가능 상태로 해석합니다.",
+            "임계 기준을 벗어난 항목이 0개입니다. 따라서 PASS로 표시합니다.",
+            "PASS는 무제한 운영 승인이라기보다 정기 모니터링 조건의 제한적 배치 가능 상태입니다.",
         ]
 
-    basis = []
+    basis = [
+        f"현재 임계 기준 이탈 항목은 warning {warning_count}개, critical {critical_count}개입니다.",
+        f"판단 규칙: 이탈 0개=PASS, warning 1~{critical_warning_count - 1}개=WARNING, critical 1개 이상 또는 warning {critical_warning_count}개 이상=CRITICAL입니다.",
+    ]
     for issue in issues[:5]:
         basis.append(
             f"{_issue_dimension_ko(issue.get('dimension', ''))}: {_issue_severity_ko(issue.get('severity', ''))} — "
@@ -702,7 +698,6 @@ def _judgment_basis(report: dict[str, Any], metrics: dict[str, Any], thresholds:
     if len(issues) > 5:
         basis.append(f"그 밖에도 {len(issues) - 5}개 항목이 추가로 경고 목록에 포함되었습니다.")
     return basis
-
 
 def _badge(status: str) -> None:
     if status == "critical":
@@ -781,7 +776,6 @@ def _render_term_expander() -> None:
         <tr><td>Subgroup gap</td><td>나이, 성별, 촬영 자세 같은 하위집단 사이의 AUROC 차이입니다. 작을수록 특정 집단에 덜 치우칩니다.</td><td>Subgroup gap warning threshold를 낮추면 하위집단 불균형에 더 민감하게 경고합니다.</td></tr>
         <tr><td>External drop</td><td>다른 병원/외부 데이터에서 성능이 얼마나 떨어지는지 보는 값입니다.</td><td>External drop critical threshold를 낮추면 외부기관 일반화 실패를 더 강하게 차단합니다.</td></tr>
         <tr><td>Shortcut ratio</td><td>폐 병변 대신 마커, 테두리, 문자, 기기 흔적 같은 엉뚱한 단서에 의존할 위험 신호입니다. 이 화면에서는 확인된 shortcut 건수를 FP/FN 오류 후보 분모로 보정해 표시합니다.</td><td>Shortcut ratio warning threshold를 낮추면 Grad-CAM/ROI 검증을 더 엄격하게 요구합니다.</td></tr>
-        <tr><td>Hidden stratification</td><td>전체 평균은 좋아도 특정 숨은 환자군에서만 성능이 나쁜지 찾는 검사입니다.</td><td>Cluster count를 늘리면 더 세분화해서 찾고, Minimum stratum size를 높이면 너무 작은 군집을 무시합니다.</td></tr>
         <tr><td>pp</td><td>percentage point의 약자입니다. 예: 90%에서 87%로 떨어지면 3pp 하락입니다.</td><td>AUROC gap/drop 같은 차이를 읽을 때 쓰는 단위입니다.</td></tr>
     </tbody>
 </table>
@@ -798,6 +792,24 @@ def _render_control_help(thresholds: dict[str, Any]) -> None:
     <b>조절 방법:</b> 현재 기준은 ECE ≥ {thresholds['ece_warn']:.3f}, Youden's J &lt; {thresholds['youden_min']:.2f},
     하위집단 격차 ≥ {thresholds['domain_gap_warn_pp']:.1f}pp, 외부기관 하락 ≥ {thresholds['external_drop_critical_pp']:.1f}pp,
     shortcut 비율 ≥ {thresholds['shortcut_warn']:.0%}일 때 경고를 띄웁니다.
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_batch_judgment_criteria(thresholds: dict[str, Any]) -> None:
+    critical_warning_count = int(thresholds.get("critical_warning_count", 3))
+    st.markdown(
+        f"""
+<div class="judgment-panel">
+    <h4>배치 판단 count 기준</h4>
+    <ul class="judgment-list">
+        <li><b>PASS</b>: 임계 기준을 벗어난 warning/critical 항목이 0개일 때입니다.</li>
+        <li><b>WARNING</b>: warning 항목이 1~{critical_warning_count - 1}개이고, critical 항목은 0개일 때입니다. 원인 확인 후 제한 배치를 검토합니다.</li>
+        <li><b>CRITICAL</b>: critical 항목이 1개 이상이거나, warning 항목이 {critical_warning_count}개 이상 누적될 때입니다. 문제 해결 전 배치를 차단합니다.</li>
+        <li>현재 critical로 직접 분류되는 항목은 외부기관 AUROC 하락입니다. 나머지는 warning으로 누적되어 batch-level 판단을 올립니다.</li>
+    </ul>
 </div>
 """,
         unsafe_allow_html=True,
@@ -862,15 +874,7 @@ with st.sidebar:
     external_drop_critical_pp = st.slider("외부기관 성능 하락 차단 기준 (pp)", 0.0, 20.0, 3.0, 0.5, help="외부 데이터에서 AUROC가 이 값 이상 떨어지면 CRITICAL로 봅니다.")
     shortcut_warn = st.slider("Shortcut 비율 경고 기준", 0.00, 1.00, 0.5, 0.1, help="폐 영역 밖 단서에 의존할 위험 비율입니다. 이 값 이상이면 경고로 봅니다.")
 
-    st.markdown("### 숨은 취약군 탐색")
-    n_clusters = st.slider("군집 개수", 2, 8, 4, 1, help="더 크게 잡으면 환자군을 더 세분화해 숨은 취약군을 찾습니다.")
-    min_size = st.slider("최소 군집 크기", 10, 200, 20, 10, help="너무 작은 군집을 경고에서 제외하기 위한 최소 표본 수입니다.")
-
 metrics: dict[str, Any] = {}
-threshold_for_error = 0.5
-hidden_result = None
-hidden_note = ""
-
 if disease and not pred_df.empty:
     y_true = pd.to_numeric(pred_df[f"{disease}_true"], errors="coerce").fillna(0).astype(int).to_numpy()
     y_prob = pd.to_numeric(pred_df[f"{disease}_prob"], errors="coerce").fillna(0.0).clip(0, 1).to_numpy()
@@ -878,26 +882,6 @@ if disease and not pred_df.empty:
     j, best_thr, sens, spec = _best_youden_j(y_true, y_prob)
     auc = _safe_auroc(y_true, y_prob)
     metrics.update({"ece": ece, "youden_j": j, "best_threshold": best_thr, "sensitivity": sens, "specificity": spec, "auroc": auc})
-    threshold_for_error = best_thr if np.isfinite(best_thr) else 0.5
-
-    features = _make_proxy_features(pred_df)
-    if detect_hidden_strata is not None and not features.empty and len(features) >= n_clusters:
-        try:
-            hidden_result = detect_hidden_strata(
-                features.to_numpy(dtype=np.float32),
-                y_true,
-                y_prob,
-                n_clusters=n_clusters,
-                threshold=threshold_for_error,
-                min_size=min_size,
-                random_state=42,
-            )
-            metrics["hidden_flagged_count"] = hidden_result["flagged_count"]
-            hidden_note = "현재 프로젝트에는 penultimate embedding 파일이 없어 metadata+probability 기반 proxy clustering으로 계산했습니다."
-        except Exception as exc:
-            hidden_note = f"hidden stratification 계산 실패: {exc}"
-    elif IMPORT_ERROR is not None:
-        hidden_note = f"hidden stratification 모듈 import 실패: {IMPORT_ERROR}"
 
 view_gap = _view_gap_pp(view_df)
 age_gap = _age_gap_pp(age_df)
@@ -926,12 +910,15 @@ thresholds = {
     "domain_gap_warn_pp": domain_gap_warn_pp,
     "external_drop_critical_pp": external_drop_critical_pp,
     "shortcut_warn": shortcut_warn,
+    "warning_issue_count": 1,
+    "critical_warning_count": 3,
 }
 report = _adjustable_report(metrics, thresholds)
 
 _render_quick_guide()
 _render_term_expander()
 _render_control_help(thresholds)
+_render_batch_judgment_criteria(thresholds)
 
 _badge(report["overall_status"])
 _render_judgment_basis(report, metrics, thresholds)
@@ -975,7 +962,7 @@ with row1[3]:
 if metrics.get("shortcut_note"):
     st.info(metrics["shortcut_note"])
 
-row2 = st.columns(4)
+row2 = st.columns(3)
 with row2[0]:
     _metric_card(
         "View gap",
@@ -997,16 +984,6 @@ with row2[2]:
         f"외부기관 성능 하락입니다. 차단 기준은 {external_drop_critical_pp:.1f}pp입니다.",
         _metric_tone(metrics.get("external_drop_pp"), external_drop_critical_pp, "low_is_good"),
     )
-with row2[3]:
-    hidden_count = metrics.get("hidden_flagged_count", "—")
-    hidden_tone = "warn" if isinstance(hidden_count, (int, float)) and hidden_count > 0 else "good" if hidden_count == 0 else "neutral"
-    _metric_card(
-        "Hidden strata",
-        str(hidden_count),
-        "평균 성능에 가려진 취약 환자군 개수입니다.",
-        hidden_tone,
-    )
-
 st.divider()
 
 left, right = st.columns([1, 1])
@@ -1022,7 +999,6 @@ with left:
         {"지표": "하위집단 AUROC 격차", "입력 파일": "view/age/gender_subgroup.csv", "계산값": None if not np.isfinite(metrics.get("domain_gap_pp", float("nan"))) else f"{metrics['domain_gap_pp']:.1f}pp"},
         {"지표": "외부기관 AUROC 하락", "입력 파일": "domain_shift.csv", "계산값": None if not np.isfinite(metrics.get("external_drop_pp", float("nan"))) else f"{metrics['external_drop_pp']:.1f}pp"},
         {"지표": "Shortcut 위험 비율", "입력 파일": metrics.get("shortcut_source", "shortcut_regions.csv"), "계산값": None if not np.isfinite(metrics.get("shortcut_ratio", float("nan"))) else f"{metrics['shortcut_ratio']:.1%} ({metrics.get('shortcut_count', 0)}/{metrics.get('shortcut_denominator', 0)}), 샘플 내부 {metrics.get('shortcut_sample_ratio', float('nan')):.1%}"},
-        {"지표": "숨은 취약군 탐색", "입력 파일": "test_predictions.csv proxy features", "계산값": metrics.get("hidden_flagged_count", None)},
     ]
     df_source = pd.DataFrame(source_rows).astype(str)
     st.dataframe(df_source, hide_index=True, width="stretch")
@@ -1068,31 +1044,6 @@ if disease and not pred_df.empty:
         fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="Perfect calibration", line=dict(dash="dash")))
         fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="평균 예측 확률", yaxis_title="실제 양성 비율", xaxis=dict(range=[0, 1]), yaxis=dict(range=[0, 1]))
         st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-
-st.divider()
-st.subheader("숨은 취약군(hidden stratification) 탐색")
-st.markdown(
-    '<p class="section-title-note">전체 평균 성능은 좋아도 특정 조건의 환자군에서만 오류가 집중될 수 있습니다.</p>',
-    unsafe_allow_html=True,
-)
-if hidden_note:
-    st.info(hidden_note)
-if hidden_result is not None:
-    strata_df = pd.DataFrame([x.__dict__ for x in hidden_result["strata"]])
-    if not strata_df.empty:
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            st.dataframe(strata_df, hide_index=True, width="stretch")
-        with c2:
-            fig = go.Figure()
-            fig.add_trace(go.Bar(x=strata_df["stratum_id"].astype(str), y=strata_df["error_rate"], name="Error rate"))
-            fig.add_trace(go.Scatter(x=strata_df["stratum_id"].astype(str), y=strata_df["auroc"], mode="lines+markers", name="AUROC", yaxis="y2"))
-            fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Proxy stratum", yaxis=dict(title="오류율", range=[0, 1]), yaxis2=dict(title="AUROC", overlaying="y", side="right", range=[0, 1]), legend=dict(orientation="h", y=1.1))
-            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-    else:
-        st.info("Minimum size 조건을 만족하는 strata가 없습니다.")
-else:
-    st.warning("hidden stratification proxy 결과를 계산하지 못했습니다.")
 
 st.divider()
 with st.expander("개발자용 원본 readiness JSON 보기", expanded=False):
