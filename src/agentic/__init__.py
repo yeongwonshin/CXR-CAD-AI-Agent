@@ -11,7 +11,7 @@ from .dynamic_agent import (
     DynamicBatchWorkflowAgent,
     DynamicCXRWorkflowAgent,
 )
-from .llm_agent import generate_llm_agent_reply, compact_agent_result
+from .llm_agent import compact_agent_result, generate_llm_agent_reply, get_agent_runtime_status
 
 __all__ = [
     "build_agent_case_profile",
@@ -22,5 +22,6 @@ __all__ = [
     "DynamicBatchWorkflowAgent",
     "DynamicCXRWorkflowAgent",
     "generate_llm_agent_reply",
+    "get_agent_runtime_status",
     "compact_agent_result",
 ]
