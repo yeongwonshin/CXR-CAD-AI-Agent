@@ -1,4 +1,4 @@
-# CXR-CAD - Chest X-ray Computer-Aided Detection
+# CXR-CAD - AI-Agent
 
 [whatch the demo video](https://drive.google.com/file/d/1bgSycOwmrIX82I-phvk34ngxv-HMjbI0/view?usp=drive_link)
 
