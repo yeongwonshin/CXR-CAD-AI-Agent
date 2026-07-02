@@ -1,5 +1,7 @@
 # CXR-CAD - Chest X-ray Computer-Aided Detection
 
+[whatch the demo video](https://drive.google.com/file/d/1bgSycOwmrIX82I-phvk34ngxv-HMjbI0/view?usp=drive_link)
+
 > End-to-end multi-label classification CAD system for 14 thoracic diseases  
 > DenseNet-121 / EfficientNet-B4 / ViT-B/16 / NIH ChestX-ray14 Dataset
 
